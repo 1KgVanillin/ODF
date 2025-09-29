@@ -39,3 +39,6 @@
 
 # debug information files
 *.dwo
+/.vs/OOD
+/.vs
+/OOD/x64/Debug
