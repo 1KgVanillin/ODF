@@ -275,9 +275,7 @@ public:
 	};
 
 	bool isObjectArray(std::unordered_map<std::string, Type>* fields = nullptr) const; // if fields isnt nullptr, then it returns a ist of the keys with their type
-	static constexpr size_t LIST_OVERFLOW_SIZE = 256;
-	static constexpr size_t LLIST_OVERFLOW_SIZE = 65'536;
-	static constexpr size_t MXLIST_OVERFLOW_SIZE = 4'294'967'295;
+	
 	ComplexType header;
 	//data
 	//For basicly every non-complex type

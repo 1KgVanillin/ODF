@@ -18,23 +18,33 @@
     <ClCompile Include="main.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
-    <ClCompile Include="OOD.cpp">
+    <ClCompile Include="ODF.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="MemoryDataStream.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="OOD.h">
-      <Filter>Headerdateien</Filter>
-    </ClInclude>
     <ClInclude Include="OODErrorCodes.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
     <ClInclude Include="GenericDebug.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
+    <ClInclude Include="ODF.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="MemoryDataStream.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="Definitions.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="doc.md" />
     <None Include="v2.md" />
+    <None Include="OOF.tpp" />
   </ItemGroup>
 </Project>

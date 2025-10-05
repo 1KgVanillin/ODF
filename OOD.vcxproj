@@ -130,18 +130,22 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="OOD.cpp" />
+    <ClCompile Include="MemoryDataStream.cpp" />
+    <ClCompile Include="ODF.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Definitions.h" />
     <ClInclude Include="GenericDebug.h" />
-    <ClInclude Include="OOD.h" />
+    <ClInclude Include="MemoryDataStream.h" />
     <ClInclude Include="OODErrorCodes.h" />
+    <ClInclude Include="ODF.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="doc.md">
       <SubType>
       </SubType>
     </None>
+    <None Include="OOF.tpp" />
     <None Include="v2.md">
       <SubType>
       </SubType>
