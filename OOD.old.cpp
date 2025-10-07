@@ -1,3 +1,4 @@
+#include "ODF.h"
 #include "OOD.h"
 
 bool OOD::enable_string_obfuscation_static = enable_string_obfuscation_default;
@@ -1240,6 +1241,22 @@ bool OOD::ComplexType::isPrimitive() const
 bool OOD::ComplexType::isString() const
 {
 	return type != Type::CSTR && type != Type::WSTR;
+}
+
+Type& ODF::Type::operator=(const Type& other)
+{
+	if (&other == *this)
+		return *this;
+
+	if (other.obj)
+		obj = new ObjectSpecifier(*other.obj);
+
+	if (other.size)
+		size = new SizeSpecifier(*other.size);
+
+	type = other.type;
+
+	return *this;
 }
 
 void OOD::MixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const

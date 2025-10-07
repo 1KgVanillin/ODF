@@ -1,4 +1,4 @@
-#include "OOF.h"
+#include "ODF.h"
 
 #pragma region specifiers
 #pragma region TypeSpecifier
@@ -75,6 +75,7 @@ void ODF::MixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 	// save zero to end object specifier
 	mem.write<UINT_8>(0);
 }
+
 void ODF::FixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 {
 	// save type
@@ -149,8 +150,63 @@ ODF::Type::Type()
 	size = nullptr;
 }
 
+ODF::Type::Type(const Type& other)
+{
+	*this = other;
+}
+
 ODF::Type::~Type()
 {
 }
 #pragma endregion
+
+std::string ODF::PlainTextConverter::toPlainText(MemoryDataStream& mem)
+{
+	return std::string();
+}
+
+bool ODF::PlainTextConverter::toBinary(const std::string& str, MemoryDataStream& dest)
+{
+	return false;
+}
+
+ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
+{
+
+}
+
+ODF::Status ODF::saveToMemory(char* destination, size_t size) const
+{
+	return Status();
+}
+
+ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
+{
+
+}
+
+ODF::Status ODF::loadFromMemory(const char* data, size_t size)
+{
+
+}
+
+ODF::Status ODF::saveToFile(std::string file)
+{
+
+}
+
+ODF::Status ODF::loadFromFile(std::string file)
+{
+
+}
+
+ODF::Status ODF::saveToStream(std::ostream& out, bool binary)
+{
+
+}
+
+ODF::Status ODF::loadFromStream(std::istream& in, bool binary)
+{
+
+}
 

@@ -16,7 +16,6 @@
 class DF_API ODF // optimized object format
 {
 public:
-
 	//Specifiers
 	struct Type;
 
@@ -98,9 +97,42 @@ public:
 		bool isPrimitive() const;
 		bool isString() const;
 
+		Type& operator=(const Type& other);
+
 		Type();
+		Type(const Type& other);
 		~Type();
 	};
+
+	// converts form binary to plain text representation and the other way around
+	class PlainTextConverter
+	{
+
+	public:
+		std::string toPlainText(MemoryDataStream& mem);
+		bool toBinary(const std::string& str, MemoryDataStream& dest);
+	};
+
+	enum class Status
+	{
+		Success = 0,
+		FileOpenError,
+		RWError,
+		FileCloseError,
+		ParseError
+	};
+
+	// stream functions
+	Status saveToMemory(MemoryDataStream& mem) const;
+	Status saveToMemory(char* destination, size_t size) const;
+	Status loadFromMemory(MemoryDataStream& mem);
+	Status loadFromMemory(const char* data, size_t size);
+
+	Status saveToFile(std::string file);
+	Status loadFromFile(std::string file);
+
+	Status saveToStream(std::ostream& out, bool binary = true);
+	Status loadFromStream(std::istream& in, bool binary = true);
 };
 
 #include "OOF.tpp"
