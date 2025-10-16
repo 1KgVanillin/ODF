@@ -1,3 +1,4 @@
+#include "MemoryDataStream.h"
 #include "ODF.h"
 #include "OOD.h"
 
@@ -186,9 +187,15 @@ void MemoryDataStream::disableStringObfuscation()
 	enableStringObfuscation(false);
 }
 
+void MemoryDataStream::enableDynamicAllocation()
+{
+	
+}
+
 void OOD::disableStringObfuscation(bool justForThis)
 {
 	if (justForThis)
+
 		enable_string_obfuscation = false;
 	else
 		enable_string_obfuscation_static = false;

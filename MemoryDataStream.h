@@ -9,6 +9,20 @@
 // This class is a smart pointer, safe memory accessor, memory stream and encryption tool in just one class :)
 class DF_API MemoryDataStream
 {
+	class DynamicAllocationMetadata // for allocating memory, write only.
+	{
+		std::vector<char> vecdata;
+	public:
+		template<typename T>
+		void write(T data)
+		{
+			write(sizeof(T), (char*)&data);
+		}
+		void write(size_t size, const char* data);
+		size_t size() const;
+		const char* data() const;
+	};
+
 	char* start;
 	char* current;
 	char* firstInvalidAddress;
@@ -23,6 +37,9 @@ class DF_API MemoryDataStream
 	bool writeFullStream; // if this is true and on destruction or call of finish() current != firstInvalidAddress, then throw an exception
 	bool finished; // was finish() already called? if yes, then the destructor does nothing.
 	bool obfuscated;
+	// bool dynamicAllocation; // this is represented by a nullptr or valid address in dynamicAllocationMeta*
+	DynamicAllocationMetadata* dynamicAllocationMeta;
+	void migrateData();
 
 	static void makeUnreadable(std::string& str);
 	static void makeReadable(std::string& str);
@@ -54,6 +71,7 @@ public:
 	void deallocateDataOnDestruction(bool deallocate);
 	void enableStringObfuscation(bool obfuscation = true);
 	void disableStringObfuscation();
+	void enableDynamicAllocation(); // cannot be disabled, stream can be used as before. Uses a std::vector internally. Performance heavy enabled when data is already present, as it is migrated to a std::vector
 	void allocate(size_t size);
 	void deallocate(); // explicitely deallocate data. Called in Destructor
 	MemoryDataStream move(); // the current stream looses all its rights to the data and transfers it to a new one and returns it.
@@ -95,7 +113,7 @@ public:
 		return value;
 	}
 
-	MemoryDataStream(size_t size); // allocates own data
+	MemoryDataStream(size_t size); // allocates own data, if 0 specified, dynamic allocation on write() calls.
 	MemoryDataStream(char* data);
 	MemoryDataStream(const char* data);
 	MemoryDataStream(char* data, char* firstInvalidAddr);

@@ -114,9 +114,16 @@ void MemoryDataStream::allocate(size_t size)
 
 void MemoryDataStream::deallocate()
 {
-	delete[] start;
-	selfAllocated = false;
-	start = current = nullptr;
+	if (dynamicAllocation)
+	{
+
+	}
+	else
+	{
+		delete[] start;
+		selfAllocated = false;
+		start = current = nullptr;
+	}	
 }
 
 MemoryDataStream MemoryDataStream::move()
@@ -199,6 +206,7 @@ void MemoryDataStream::baseinit()
 	deallocateDataOnDestruction(false);
 	selfAllocated = false;
 	finished = false;
+	dynamicAllocationMeta = nullptr;
 }
 
 void MemoryDataStream::makeUnreadable(std::wstring& wstr)
@@ -210,6 +218,12 @@ void MemoryDataStream::makeUnreadable(std::wstring& wstr)
 	//swap some stuff
 	for (size_t i = 0; i < wstr.size() - 1; i += 2)
 		std::swap(wstr[i], wstr[i + 1]);
+}
+
+void MemoryDataStream::DynamicAllocationMetadata::newChunk()
+{
+	chunks.push_back(new char[chunkSize]);
+	currentPosition = 0;
 }
 
 void MemoryDataStream::write(const char* bytes, size_t size)
@@ -229,6 +243,36 @@ void MemoryDataStream::write(const char* bytes, size_t size)
 	{
 		THROW WriteViolation("MemoryDataStream exceeded specified range.");
 	}
+}
+
+void MemoryDataStream::DynamicAllocationMetadata::write(char* data, size_t size)
+{
+	if (!chunks.size())
+		newChunk();
+
+	
+	memcpy(chunks[chunks.size() - 1], data, size)
+}
+
+void MemoryDataStream::DynamicAllocationMetadata::read(size_t startindex, char* dest, size_t size)
+{
+	size_t chunk = startindex / chunkSize;
+	size_t endChunk = (startindex + size) / chunkSize;
+	unsigned char chunkPosition = startindex % chunkSize;
+	unsigned char endChunkPosition = (startindex + size) % chunkSize;
+
+	// copy start chunk
+	memcpy(dest, chunks[chunk], chunkSize - chunkPosition);
+	if (chunkSize - chunkPosition < size || size < chunkSize)
+		return;
+
+	// copy middle (full) chunks
+	for (size_t i = chunk + 1; i <= endChunk - 1; i++)
+		memcpy(dest + (chunkSize - chunkPosition), chunks[i], chunkSize);
+
+	if (endChunkPosition) // check this somehow
+	// copy last chunk
+	memcpy((dest + size) - (chunkSize - endChunkPosition), chunks[endChunk], endChunkPosition + 1);
 }
 
 std::string MemoryDataStream::readStr()
@@ -393,3 +437,39 @@ MemoryDataStream::ReadOnlyViolation::ReadOnlyViolation(std::string message) : ru
 MemoryDataStream::WriteViolation::WriteViolation(std::string message) : runtime_error(message) {}
 
 MemoryDataStream::IncompleteWrite::IncompleteWrite(std::string message) : runtime_error(message) {}
+
+MemoryDataStream::DynamicAllocationMetadata::DynamicAllocationMetadata()
+{
+	chunkSize = defaultChunkSize;
+	currentPosition = 0;
+}
+
+void MemoryDataStream::DynamicAllocationMetadata::deallocate()
+{
+	for (void* chunk : chunks)
+		delete chunk;
+	chunks.clear();
+	currentPosition = 0;
+}
+
+MemoryDataStream::DynamicAllocationMetadata::~DynamicAllocationMetadata()
+{
+	deallocate();
+}
+
+void MemoryDataStream::DynamicAllocationMetadata::write(size_t size, const char* data)
+{
+	vecdata.reserve(vecdata.size() + size);
+	for (size_t i = 0; i < size; i++)
+		vecdata.push_back(data[i]);
+}
+
+size_t MemoryDataStream::DynamicAllocationMetadata::size() const
+{
+	return vecdata.size();
+}
+
+const char* MemoryDataStream::DynamicAllocationMetadata::data() const
+{
+	return vecdata.data();
+}
