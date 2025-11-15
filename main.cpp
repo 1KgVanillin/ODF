@@ -13,5 +13,6 @@
 
 int main()
 {
+	std::vector<char> vec;
 	return 0;
 }

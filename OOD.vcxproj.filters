@@ -45,6 +45,9 @@
   <ItemGroup>
     <None Include="doc.md" />
     <None Include="v2.md" />
-    <None Include="OOF.tpp" />
+    <None Include="OOF.tpp">
+      <Filter>Quelldateien</Filter>
+    </None>
+    <None Include="MemoryDataStream.md" />
   </ItemGroup>
 </Project>

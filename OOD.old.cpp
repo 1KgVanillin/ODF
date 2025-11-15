@@ -875,7 +875,7 @@ void MemoryDataStream::setPreprocessor(std::function<void(char*, size_t)> prepro
 	enablePreprocessing = true;
 }
 
-void MemoryDataStream::disablePreprocessor()
+void MemoryDataStream::disablePreprocessing()
 {
 	enablePreprocessing = false;
 }
@@ -886,7 +886,7 @@ void MemoryDataStream::setPostprocessor(std::function<void(char*, size_t)> postp
 	enablePostprocessing = true;
 }
 
-void MemoryDataStream::disablePostprocessor()
+void MemoryDataStream::disablePostprocessing()
 {
 	enablePostprocessing = false;
 }
@@ -992,8 +992,8 @@ void MemoryDataStream::baseinit()
 {
 	enableSecurity();
 	disableByteEncryption();
-	disablePreprocessor();
-	disablePostprocessor();
+	disablePreprocessing();
+	disablePostprocessing();
 	deallocateDataOnDestruction(false);
 	selfAllocated = false;
 	finished = false;

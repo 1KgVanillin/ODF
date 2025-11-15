@@ -96,9 +96,9 @@ public:
 	void setByteDecryptor(std::function<void(char&)> byteDecryptor); // key needs to be either hardcoded or passed via lampda capture
 	void disableByteEncryption();
 	void setPreprocessor(std::function<void(char*, size_t)> preprocessorFunction); // key needs to be either hardcoded or passed via lampda capture
-	void disablePreprocessor();
+	void disablePreprocessing();
 	void setPostprocessor(std::function<void(char*, size_t)> postprocessorFunction); // key needs to be either hardcoded or passed via lampda capture
-	void disablePostprocessor();
+	void disablePostprocessing();
 	void deallocateDataOnDestruction(bool deallocate);
 	void enableStringObfuscation(bool obfuscation = true);
 	void disableStringObfuscation();

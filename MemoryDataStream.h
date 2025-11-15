@@ -39,7 +39,7 @@ class DF_API MemoryDataStream
 	bool obfuscated;
 	// bool dynamicAllocation; // this is represented by a nullptr or valid address in dynamicAllocationMeta*
 	DynamicAllocationMetadata* dynamicAllocationMeta;
-	void migrateData();
+	void migrateData(); // convert exitsing object into write only, but with dynamic allocation enabled.
 
 	static void makeUnreadable(std::string& str);
 	static void makeReadable(std::string& str);
@@ -64,10 +64,11 @@ public:
 	void setByteEncryptor(std::function<void(char&)> byteEncryptor); // key needs to be either hardcoded or passed via lampda capture
 	void setByteDecryptor(std::function<void(char&)> byteDecryptor); // key needs to be either hardcoded or passed via lampda capture
 	void disableByteEncryption();
-	void setPreprocessor(std::function<void(char*, size_t)> preprocessorFunction); // key needs to be either hardcoded or passed via lampda capture
-	void disablePreprocessor();
+	void setPreprocessor(std::function<void(char*, size_t)> preprocessorFunction, bool instantExecute = true); // key needs to be either hardcoded or passed via lampda capture
+	void executePreprocessor();
+	void disablePreprocessing();
 	void setPostprocessor(std::function<void(char*, size_t)> postprocessorFunction); // key needs to be either hardcoded or passed via lampda capture
-	void disablePostprocessor();
+	void disablePostprocessing();
 	void deallocateDataOnDestruction(bool deallocate);
 	void enableStringObfuscation(bool obfuscation = true);
 	void disableStringObfuscation();
@@ -76,7 +77,7 @@ public:
 	void deallocate(); // explicitely deallocate data. Called in Destructor
 	MemoryDataStream move(); // the current stream looses all its rights to the data and transfers it to a new one and returns it.
 	void move(MemoryDataStream& mem); // just like the other move.
-	void finish(); // basically the destructor. Call if the Stream is no longer needed. Handles memory deallocation
+	void finish(); // basically the destructor. Call if the Stream is no longer needed. Handles memory deallocation. Object becomes invalid after a call to this function
 
 	void write(const char* bytes, size_t size);
 	template<typename T>
@@ -90,7 +91,7 @@ public:
 	void writeStr(std::string str);
 	void writeWstr(std::wstring wstr);
 
-	unsigned char peek() const;
+	char peek() const;
 	void peek(char* destination, size_t size);
 	char read();
 	void read(char* destination, size_t size);
@@ -113,7 +114,7 @@ public:
 		return value;
 	}
 
-	MemoryDataStream(size_t size); // allocates own data, if 0 specified, dynamic allocation on write() calls.
+	MemoryDataStream(size_t size = 0); // allocates own data, if 0 specified, dynamic allocation on write() calls.
 	MemoryDataStream(char* data);
 	MemoryDataStream(const char* data);
 	MemoryDataStream(char* data, char* firstInvalidAddr);

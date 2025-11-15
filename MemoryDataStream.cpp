@@ -71,13 +71,19 @@ void MemoryDataStream::disableByteEncryption()
 	enableBytewiseEncryption = false;
 }
 
-void MemoryDataStream::setPreprocessor(std::function<void(char*, size_t)> preprocessorFunction)
+void MemoryDataStream::setPreprocessor(std::function<void(char*, size_t)> preprocessorFunction, bool instantExecute)
 {
 	preprocessor = preprocessorFunction;
 	enablePreprocessing = true;
 }
 
-void MemoryDataStream::disablePreprocessor()
+void MemoryDataStream::executePreprocessor()
+{
+	if (enablePreprocessing)
+		preprocessor(start, firstInvalidAddress - start);
+}
+
+void MemoryDataStream::disablePreprocessing()
 {
 	enablePreprocessing = false;
 }
@@ -88,7 +94,7 @@ void MemoryDataStream::setPostprocessor(std::function<void(char*, size_t)> postp
 	enablePostprocessing = true;
 }
 
-void MemoryDataStream::disablePostprocessor()
+void MemoryDataStream::disablePostprocessing()
 {
 	enablePostprocessing = false;
 }
@@ -201,8 +207,8 @@ void MemoryDataStream::baseinit()
 {
 	enableSecurity();
 	disableByteEncryption();
-	disablePreprocessor();
-	disablePostprocessor();
+	disablePreprocessing();
+	disablePostprocessing();
 	deallocateDataOnDestruction(false);
 	selfAllocated = false;
 	finished = false;
@@ -317,7 +323,7 @@ void MemoryDataStream::writeWstr(std::wstring wstr)
 	write((char*)wstr.c_str(), (wstr.size() + 1) * sizeof(wchar_t)); // 1000 IQ because reusing the null terminator
 }
 
-unsigned char MemoryDataStream::peek() const
+char MemoryDataStream::peek() const
 {
 	if (current < firstInvalidAddress || insecure)
 		return *current;
