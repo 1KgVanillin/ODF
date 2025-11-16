@@ -1025,7 +1025,7 @@ void MemoryDataStream::write(const char* bytes, size_t size)
 	}
 	else
 	{
-		THROW WriteViolation("MemoryDataStream exceeded specified range.");
+		THROW AccessViolation("MemoryDataStream exceeded specified range.");
 	}
 }
 
@@ -1188,7 +1188,7 @@ MemoryDataStream::~MemoryDataStream()
 
 MemoryDataStream::ReadOnlyViolation::ReadOnlyViolation(std::string message) : runtime_error(message) {}
 
-MemoryDataStream::WriteViolation::WriteViolation(std::string message) : runtime_error(message) {}
+MemoryDataStream::AccessViolation::AccessViolation(std::string message) : runtime_error(message) {}
 
 MemoryDataStream::IncompleteWrite::IncompleteWrite(std::string message) : runtime_error(message) {}
 

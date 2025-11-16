@@ -11,14 +11,15 @@ class DF_API MemoryDataStream
 {
 	class DynamicAllocationMetadata // for allocating memory, write only.
 	{
-		std::vector<char> vecdata;
 	public:
+		std::vector<char> vecdata;
 		template<typename T>
 		void write(T data)
 		{
-			write(sizeof(T), (char*)&data);
+			write((char*)&data, sizeof(T));
 		}
-		void write(size_t size, const char* data);
+		void write(const char* data, size_t size);
+		void read(size_t startindex, char* dest, size_t size); // just in case manual access is needed.
 		size_t size() const;
 		const char* data() const;
 	};
@@ -38,7 +39,7 @@ class DF_API MemoryDataStream
 	bool finished; // was finish() already called? if yes, then the destructor does nothing.
 	bool obfuscated;
 	// bool dynamicAllocation; // this is represented by a nullptr or valid address in dynamicAllocationMeta*
-	DynamicAllocationMetadata* dynamicAllocationMeta;
+	DynamicAllocationMetadata* dynamicAllocation;
 	void migrateData(); // convert exitsing object into write only, but with dynamic allocation enabled.
 
 	static void makeUnreadable(std::string& str);
@@ -128,10 +129,15 @@ public:
 	{
 		ReadOnlyViolation(std::string message);
 	};
-	// thrown if trying to write out of bounds in a secure stream
-	struct WriteViolation : public std::runtime_error
+	// throw if trying to read from a dynamically allocated stream
+	struct WriteOnlyViolation : public std::runtime_error
 	{
-		WriteViolation(std::string message);
+		WriteOnlyViolation(std::string message);
+	};
+	// thrown if trying to write or read out of bounds in a secure stream
+	struct AccessViolation : public std::runtime_error
+	{
+		AccessViolation(std::string message);
 	};
 	// thrown if the stream hasnt reached its end on finish() if writeFullStream is specified
 	struct IncompleteWrite : public std::runtime_error

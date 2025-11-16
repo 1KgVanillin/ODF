@@ -122,7 +122,8 @@ void MemoryDataStream::deallocate()
 {
 	if (dynamicAllocation)
 	{
-
+		delete dynamicAllocation;
+		dynamicAllocation = nullptr;
 	}
 	else
 	{
@@ -139,6 +140,7 @@ MemoryDataStream MemoryDataStream::move()
 	selfAllocated = false;
 	deallocateOnDestruction = false;
 	start = current = nullptr;
+	dynamicAllocation = nullptr;
 	baseinit();
 	return other;
 }
@@ -155,6 +157,15 @@ void MemoryDataStream::move(MemoryDataStream& mem)
 
 void MemoryDataStream::finish()
 {
+	// handle write only streams
+	if (dynamicAllocation)
+	{
+		finished = true;
+		if (enablePostprocessing)
+			postprocessor(dynamicAllocation->vecdata.data(), dynamicAllocation->size());
+		return;
+	}
+
 	finished = true;
 	if (enablePostprocessing)
 		postprocessor(start, firstInvalidAddress - start);
@@ -179,6 +190,11 @@ void MemoryDataStream::makeReadable(std::string& str)
 	for (char& c : str)
 		if (c != ~0)
 			c = ~c;
+}
+
+// TODO
+void MemoryDataStream::migrateData()
+{
 }
 
 void MemoryDataStream::makeUnreadable(std::string& str)
@@ -212,7 +228,7 @@ void MemoryDataStream::baseinit()
 	deallocateDataOnDestruction(false);
 	selfAllocated = false;
 	finished = false;
-	dynamicAllocationMeta = nullptr;
+	dynamicAllocation = nullptr;
 }
 
 void MemoryDataStream::makeUnreadable(std::wstring& wstr)
@@ -226,14 +242,14 @@ void MemoryDataStream::makeUnreadable(std::wstring& wstr)
 		std::swap(wstr[i], wstr[i + 1]);
 }
 
-void MemoryDataStream::DynamicAllocationMetadata::newChunk()
-{
-	chunks.push_back(new char[chunkSize]);
-	currentPosition = 0;
-}
-
 void MemoryDataStream::write(const char* bytes, size_t size)
 {
+	if (dynamicAllocation)
+	{
+		dynamicAllocation->write(bytes, size);
+		return;
+	}
+
 	if (readOnly)
 	{
 		THROW ReadOnlyViolation("tried to write to read only location using MemoryDataStream.");
@@ -247,38 +263,23 @@ void MemoryDataStream::write(const char* bytes, size_t size)
 	}
 	else
 	{
-		THROW WriteViolation("MemoryDataStream exceeded specified range.");
+		THROW AccessViolation("MemoryDataStream exceeded specified range. [write(const char*, size_t)]");
 	}
 }
 
-void MemoryDataStream::DynamicAllocationMetadata::write(char* data, size_t size)
+void MemoryDataStream::DynamicAllocationMetadata::write(const char* data, size_t size)
 {
-	if (!chunks.size())
-		newChunk();
-
-	
-	memcpy(chunks[chunks.size() - 1], data, size)
+	vecdata.reserve(vecdata.size() + size);
+	for (size_t i = 0; i < size; i++)
+		vecdata.push_back(data[i]);
 }
 
 void MemoryDataStream::DynamicAllocationMetadata::read(size_t startindex, char* dest, size_t size)
 {
-	size_t chunk = startindex / chunkSize;
-	size_t endChunk = (startindex + size) / chunkSize;
-	unsigned char chunkPosition = startindex % chunkSize;
-	unsigned char endChunkPosition = (startindex + size) % chunkSize;
+	if (size > vecdata.size() - startindex)
+		throw AccessViolation("MemoryDataStream exceeded specified range (explicit read)");
 
-	// copy start chunk
-	memcpy(dest, chunks[chunk], chunkSize - chunkPosition);
-	if (chunkSize - chunkPosition < size || size < chunkSize)
-		return;
-
-	// copy middle (full) chunks
-	for (size_t i = chunk + 1; i <= endChunk - 1; i++)
-		memcpy(dest + (chunkSize - chunkPosition), chunks[i], chunkSize);
-
-	if (endChunkPosition) // check this somehow
-	// copy last chunk
-	memcpy((dest + size) - (chunkSize - endChunkPosition), chunks[endChunk], endChunkPosition + 1);
+	memcpy(dest, vecdata.data() + startindex, size);
 }
 
 std::string MemoryDataStream::readStr()
@@ -327,6 +328,7 @@ char MemoryDataStream::peek() const
 {
 	if (current < firstInvalidAddress || insecure)
 		return *current;
+	throw AccessViolation("MemoryDataStream exceeded specified range. [peek()]");
 }
 
 char MemoryDataStream::read()
@@ -335,7 +337,7 @@ char MemoryDataStream::read()
 		return *current++;
 	else
 	{
-		THROW std::out_of_range("MemoryDataStream exceeded specified range.");
+		THROW AccessViolation("MemoryDataStream exceeded specified range. [read()]");
 	}
 }
 
@@ -347,7 +349,7 @@ void MemoryDataStream::peek(char* destination, size_t size)
 	}
 	else
 	{
-		THROW std::out_of_range("MemoryDataStream exceeded specified range.");
+		THROW AccessViolation("MemoryDataStream exceeded specified range. [peek(char*, size_t)]");
 	}
 }
 
@@ -360,7 +362,7 @@ void MemoryDataStream::read(char* destination, size_t size)
 	}
 	else
 	{
-		THROW std::out_of_range("MemoryDataStream exceeded specified range.");
+		THROW AccessViolation("MemoryDataStream exceeded specified range. [read(char*, size_t)]");
 	}
 }
 
@@ -374,7 +376,7 @@ char* MemoryDataStream::read(size_t size)
 	}
 	else
 	{
-		THROW std::out_of_range("MemoryDataStream exceeded specified range.");
+		THROW AccessViolation("MemoryDataStream exceeded specified range. [read(size_t)]");
 	}
 }
 
@@ -440,34 +442,16 @@ MemoryDataStream::~MemoryDataStream()
 
 MemoryDataStream::ReadOnlyViolation::ReadOnlyViolation(std::string message) : runtime_error(message) {}
 
-MemoryDataStream::WriteViolation::WriteViolation(std::string message) : runtime_error(message) {}
+MemoryDataStream::AccessViolation::AccessViolation(std::string message) : runtime_error(message) {}
 
 MemoryDataStream::IncompleteWrite::IncompleteWrite(std::string message) : runtime_error(message) {}
 
 MemoryDataStream::DynamicAllocationMetadata::DynamicAllocationMetadata()
 {
-	chunkSize = defaultChunkSize;
-	currentPosition = 0;
-}
-
-void MemoryDataStream::DynamicAllocationMetadata::deallocate()
-{
-	for (void* chunk : chunks)
-		delete chunk;
-	chunks.clear();
-	currentPosition = 0;
 }
 
 MemoryDataStream::DynamicAllocationMetadata::~DynamicAllocationMetadata()
 {
-	deallocate();
-}
-
-void MemoryDataStream::DynamicAllocationMetadata::write(size_t size, const char* data)
-{
-	vecdata.reserve(vecdata.size() + size);
-	for (size_t i = 0; i < size; i++)
-		vecdata.push_back(data[i]);
 }
 
 size_t MemoryDataStream::DynamicAllocationMetadata::size() const
@@ -478,4 +462,8 @@ size_t MemoryDataStream::DynamicAllocationMetadata::size() const
 const char* MemoryDataStream::DynamicAllocationMetadata::data() const
 {
 	return vecdata.data();
+}
+
+MemoryDataStream::WriteOnlyViolation::WriteOnlyViolation(std::string message) : runtime_error(message)
+{
 }

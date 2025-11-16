@@ -158,9 +158,9 @@ public:
 		ReadOnlyViolation(std::string message);
 	};
 	// thrown if trying to write out of bounds in a secure stream
-	struct WriteViolation : public std::runtime_error
+	struct AccessViolation : public std::runtime_error
 	{
-		WriteViolation(std::string message);
+		AccessViolation(std::string message);
 	};
 	// thrown if the stream hasnt reached its end on finish() if writeFullStream is specified
 	struct IncompleteWrite : public std::runtime_error
