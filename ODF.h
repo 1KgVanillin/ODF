@@ -16,16 +16,32 @@
 class DF_API ODF // optimized object format
 {
 public:
-	//Specifiers
+	// Specifiers
 	struct Type;
+
+	struct Status
+	{
+		enum Value {
+			Ok = 0,
+			FileOpenError,
+			RWError,
+			FileCloseError,
+			ParseError
+		} value;
+
+		operator bool();
+		bool operator!();
+		bool operator!=(Status other);
+		bool operator==(Status other);
+		Status operator=(Status other);
+		Status(Value val = Status::Ok);
+	};
 
 	class TypeSpecifier // THe size specifier specifier is removed automatically when impicitely used.
 	{
 	public:
 		typedef unsigned char Type;
-	private:
 		Type type;
-	public:
 		inline Type byte() const; // returns just the raw byte.
 		inline Type sizeSpec() const;
 		inline bool isSigned() const;
@@ -58,7 +74,7 @@ public:
 
 	struct SizeSpecifier
 	{
-		static constexpr size_t OverflowSize8bit = 255;
+		static constexpr size_t OverflowSize8bit = 256;
 		static constexpr size_t OverflowSize16bit = 65'536;
 		static constexpr size_t OverflowSize32bit = 4'294'967'296;
 		// no OverflowSize64bit, as it would be zero on a 64bit system
@@ -92,9 +108,13 @@ public:
 		SizeSpecifier* size;
 
 		void clear(); // deletes every optional specifier
-		void saveToMemory(MemoryDataStream& mem) const;
+		Status saveToMemory(MemoryDataStream& mem) const;
 		void setType(TypeSpecifier type); // use this, otherwise the object might throw exceptions or undefined behaiviour on save
-		bool isPrimitive() const;
+		inline bool isPrimitive() const; // True if no specifies other than TypeSpecifier are needed
+		inline bool needsObjectSpecifier() const;
+		inline bool needsSizeSpecifier() const;
+		inline bool isFixed() const;
+		inline bool isMixed() const;
 		bool isString() const;
 
 		Type& operator=(const Type& other);
@@ -104,25 +124,12 @@ public:
 		~Type();
 	};
 
-	// converts form binary to plain text representation and the other way around
-	class PlainTextConverter
-	{
+	// Members
+	Type type;
 
-	public:
-		std::string toPlainText(MemoryDataStream& mem);
-		bool toBinary(const std::string& str, MemoryDataStream& dest);
-	};
+	// Interface
 
-	enum class Status
-	{
-		Success = 0,
-		FileOpenError,
-		RWError,
-		FileCloseError,
-		ParseError
-	};
-
-	// stream functions
+	// load and save functions
 	Status saveToMemory(MemoryDataStream& mem) const;
 	Status saveToMemory(char* destination, size_t size) const;
 	Status loadFromMemory(MemoryDataStream& mem);
@@ -133,6 +140,12 @@ public:
 
 	Status saveToStream(std::ostream& out, bool binary = true);
 	Status loadFromStream(std::istream& in, bool binary = true);
+
+private:
+	Status saveBody(MemoryDataStream& mem) const;
+
+	Status loadHeader(MemoryDataStream& mem);
+	Status loadBody(MemoryDataStream& mem);
 };
 
-#include "OOF.tpp"
+#include "ODF.tpp"

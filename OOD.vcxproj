@@ -149,7 +149,7 @@
       <SubType>
       </SubType>
     </None>
-    <None Include="OOF.tpp" />
+    <None Include="ODF.tpp" />
     <None Include="v2.md">
       <SubType>
       </SubType>

@@ -1,6 +1,27 @@
 #include "ODF.h"
 
 #pragma region specifiers
+ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
+{
+	// save primitive type
+	mem.write<unsigned char>(type.byte());
+
+	// save specifiers
+	if (needsSizeSpecifier())
+		size->save(mem);
+
+	if (needsObjectSpecifier())
+	{
+		// check ObjecSpecifier Type and save it
+		if (auto ptr = std::get_if<MixedObjectSpecifier>(obj))
+			ptr->saveToMemory(mem);
+		else if (auto ptr = std::get_if<FixedObjectSpecifier>(obj))
+			ptr->saveToMemory(mem);
+	}
+
+	return Status::Ok;
+}
+
 #pragma region TypeSpecifier
 inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::byte() const
 {
@@ -58,6 +79,21 @@ ODF::TypeSpecifier operator&(ODF::TypeSpecifier spec, unsigned char byte)
 ODF::TypeSpecifier operator|(ODF::TypeSpecifier spec, unsigned char byte)
 {
 	return spec.type | byte;
+}
+
+ODF::Type::Type()
+{
+	obj = nullptr;
+	size = nullptr;
+}
+
+ODF::Type::Type(const Type& other)
+{
+	*this = other;
+}
+
+ODF::Type::~Type()
+{
 }
 
 #pragma endregion
@@ -144,40 +180,21 @@ void ODF::SizeSpecifier::save(MemoryDataStream& stream) const
 }
 
 #pragma endregion
-ODF::Type::Type()
-{
-	obj = nullptr;
-	size = nullptr;
-}
-
-ODF::Type::Type(const Type& other)
-{
-	*this = other;
-}
-
-ODF::Type::~Type()
-{
-}
 #pragma endregion
-
-std::string ODF::PlainTextConverter::toPlainText(MemoryDataStream& mem)
-{
-	return std::string();
-}
-
-bool ODF::PlainTextConverter::toBinary(const std::string& str, MemoryDataStream& dest)
-{
-	return false;
-}
 
 ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 {
+	// save header
+	type.saveToMemory(mem);
 
+	// save body
+	return saveBody(mem);
 }
 
 ODF::Status ODF::saveToMemory(char* destination, size_t size) const
 {
-	return Status();
+	MemoryDataStream mem(destination, size);
+	return saveToMemory(mem);
 }
 
 ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
@@ -187,7 +204,8 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 
 ODF::Status ODF::loadFromMemory(const char* data, size_t size)
 {
-
+	MemoryDataStream mem(data, size);
+	return loadFromMemory(mem);
 }
 
 ODF::Status ODF::saveToFile(std::string file)
@@ -202,11 +220,41 @@ ODF::Status ODF::loadFromFile(std::string file)
 
 ODF::Status ODF::saveToStream(std::ostream& out, bool binary)
 {
-
 }
 
 ODF::Status ODF::loadFromStream(std::istream& in, bool binary)
 {
-
 }
 
+ODF::Status::operator bool()
+{
+	return value;
+}
+
+bool ODF::Status::operator!()
+{
+	return !bool(*this);
+}
+
+bool ODF::Status::operator!=(Status other)
+{
+	return value != other.value;
+}
+
+bool ODF::Status::operator==(Status other)
+{
+	return value == other.value;
+}
+
+ODF::Status ODF::Status::operator=(Status other)
+{
+	if (&other == this)
+		return;
+	value = other.value;
+	return *this;
+}
+
+ODF::Status::Status(Value val)
+{
+	value = val;
+}
