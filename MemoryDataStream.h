@@ -22,6 +22,9 @@ class DF_API MemoryDataStream
 		void read(size_t startindex, char* dest, size_t size); // just in case manual access is needed.
 		size_t size() const;
 		const char* data() const;
+
+		DynamicAllocationMetadata();
+		~DynamicAllocationMetadata();
 	};
 
 	char* start;
@@ -82,9 +85,9 @@ public:
 
 	void write(const char* bytes, size_t size);
 	template<typename T>
-	void write(T value)
+	void write(T content)
 	{
-		write((char*)&value, sizeof(value));
+		write((char*)&content, sizeof(content));
 	}
 
 	std::string readStr();
@@ -103,16 +106,16 @@ public:
 	template<typename T>
 	T read()
 	{
-		T value{};
-		read((char*)&value, sizeof(value));
-		return value;
+		T content{};
+		read((char*)&content, sizeof(content));
+		return content;
 	}
 	template<typename T>
 	T peek()
 	{
-		T value{};
-		peek((char*)&value, sizeof(value));
-		return value;
+		T content{};
+		peek((char*)&content, sizeof(content));
+		return content;
 	}
 
 	MemoryDataStream(size_t size = 0); // allocates own data, if 0 specified, dynamic allocation on write() calls.

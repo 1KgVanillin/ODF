@@ -6,3 +6,5 @@
 #else
 #define rethrow
 #endif
+
+struct InvalidDefault {};

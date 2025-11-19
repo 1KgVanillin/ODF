@@ -29,3 +29,6 @@
 #else
 #define DF_API
 #endif
+
+constexpr size_t SPEC_FIXED = 0;
+constexpr size_t SPEC_MIXED = 1;
