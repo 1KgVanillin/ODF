@@ -1,5 +1,7 @@
 #include "ODF.h"
 
+bool ODF::printType = true;
+
 #pragma region specifiers
 ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 {
@@ -24,7 +26,22 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 
 ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 {
-	// TODO
+	// load primitive type
+	type = mem.read<unsigned char>();
+
+	// check for size specifier
+	if (needsSizeSpecifier())
+		size->load(mem, type);
+
+	// check for object specifier
+	if (needsObjectSpecifier())
+	{
+		if (auto ptr = std::get_if<MixedObjectSpecifier>(obj))
+			ptr->saveToMemory(mem);
+		else if (auto ptr = std::get_if<FixedObjectSpecifier>(obj))
+			ptr->saveToMemory(mem);
+	}
+
 	return Status::Ok;
 }
 
@@ -55,10 +72,10 @@ ODF::TypeSpecifier::operator Type() const
 	return type & 0b00111111;
 }
 
-ODF::TypeSpecifier& ODF::TypeSpecifier::operator=(unsigned char uc)
+ODF::TypeSpecifier& ODF::TypeSpecifier::operator=(unsigned char byte)
 {
 	// TODO: hier return-Anweisung eingeben
-	type = uc;
+	type = byte;
 	return *this;
 }
 
@@ -85,6 +102,43 @@ ODF::TypeSpecifier operator&(ODF::TypeSpecifier spec, unsigned char byte)
 ODF::TypeSpecifier operator|(ODF::TypeSpecifier spec, unsigned char byte)
 {
 	return spec.type | byte;
+}
+
+std::ostream& operator<<(std::ostream& out, const ODF& odf)
+{
+	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << "[BYTE] " << (short)*ptr; }
+	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << "[UBYTE] " << (unsigned short)*ptr; }
+	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << "[SHORT] " << *ptr; }
+	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << "[USHORT] " << *ptr; }
+	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << "[INT] " << *ptr; }
+	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << "[UINT] " << *ptr; }
+	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << "[LONG] " << *ptr; }
+	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << "[ULONG] " << *ptr; }
+	if (auto ptr = std::get_if<float>(&odf.content)) { out << "[FLOAT] " << *ptr; }
+	if (auto ptr = std::get_if<double>(&odf.content)) { out << "[DOUBLE] " << *ptr; }
+	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << "[CSTR] " << *ptr; }
+	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << "[WSTR] " << ptr; }
+	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { out << "[VT_OBJ] " << *ptr; }
+	if (auto ptr = std::get_if<ODF::Array>(&odf.content)) { out << "[VT_LIST] " << *ptr; }
+	return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const ODF::Object& obj)
+{
+	out << "[Object print not implemented]";
+	return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const ODF::Array& list)
+{
+	out << "[Array print not implemented";
+	return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const std::wstring& wstr)
+{
+	for (wchar_t wc : wstr) out << static_cast<char>(wc);
+	return out;
 }
 
 bool operator==(const ODF& odf1, const ODF& odf2)
@@ -121,7 +175,7 @@ inline ODF::VariantType ODF::Type::getVariantType() const
 	case TS::WSTR: return VT_WSTR;
 	case TS::FXLIST: case TS::MXLIST: return VT_OBJ;
 	case TS::FXOBJ: case TS::MXOBJ: return VT_OBJ;
-	default: throw VariantType(0);
+	default: THROW VariantTypeConversionError();
 	}
 }
 
@@ -155,6 +209,184 @@ ODF ODF::getAs(TypeSpecifier spec) const
 	return ODF();
 }
 
+ODF& ODF::operator=(const ODF& other)
+{
+	if (&other == this)
+		return *this;
+
+	type = other.type;
+	content = other.content;
+	return *this;
+}
+
+ODF& ODF::operator=(const INT_8& val)
+{
+	type = TypeSpecifier::BYTE;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const UINT_8& val)
+{
+	type = TypeSpecifier::UBYTE;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const INT_16& val)
+{
+	type = TypeSpecifier::SHORT;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const UINT_16& val)
+{
+	type = TypeSpecifier::USHORT;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const INT_32& val)
+{
+	type = TypeSpecifier::INT;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const UINT_32& val)
+{
+	type = TypeSpecifier::UINT;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const INT_64& val)
+{
+	type = TypeSpecifier::LONG;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const UINT_64& val)
+{
+	type = TypeSpecifier::ULONG;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const float& val)
+{
+	type = TypeSpecifier::FLOAT;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const double& val)
+{
+	type = TypeSpecifier::DOUBLE;
+	content = val;
+	return *this;
+}
+
+ODF& ODF::operator=(const std::string& str)
+{
+	type = TypeSpecifier::CSTR;
+	content = str;
+	return *this;
+}
+
+ODF& ODF::operator=(const std::wstring& wstr)
+{
+	type = TypeSpecifier::WSTR;
+	content = wstr;
+	return *this;
+}
+
+ODF& ODF::operator=(const Object& obj)
+{
+	type = obj.isMixed() ? TypeSpecifier::MXOBJ : TypeSpecifier::FXOBJ;
+	content = obj;
+	return *this;
+}
+
+ODF& ODF::operator=(const Array& arr)
+{
+	type = arr.isMixed() ? TypeSpecifier::MXLIST : TypeSpecifier::FXLIST;
+	content = arr;
+	return *this;
+}
+
+ODF::operator INT_8()
+{
+	return std::get<INT_8>(content);
+}
+
+ODF::operator UINT_8()
+{
+	return std::get<UINT_8>(content);
+}
+
+ODF::operator INT_16()
+{
+	return std::get<INT_16>(content);
+}
+
+ODF::operator UINT_16()
+{
+	return std::get<UINT_16>(content);
+}
+
+ODF::operator INT_32()
+{
+	return std::get<INT_32>(content);
+}
+
+ODF::operator UINT_32()
+{
+	return std::get<UINT_32>(content);
+}
+
+ODF::operator INT_64()
+{
+	return std::get<INT_64>(content);
+}
+
+ODF::operator UINT_64()
+{
+	return std::get<UINT_64>(content);
+}
+
+ODF::operator float()
+{
+	return std::get<float>(content);
+}
+
+ODF::operator double()
+{
+	return std::get<double>(content);
+}
+
+ODF::operator std::string()
+{
+	return std::get<std::string>(content);
+}
+
+ODF::operator std::wstring()
+{
+	return std::get<std::wstring>(content);
+}
+
+ODF::operator Object()
+{
+	return std::get<Object>(content);
+}
+
+ODF::operator Array()
+{
+	return std::get<Array>(content);
+}
+
 ODF::Type::operator unsigned char()
 {
 	return type;
@@ -162,8 +394,32 @@ ODF::Type::operator unsigned char()
 
 ODF::Type& ODF::Type::operator=(const Type& other)
 {
-	// TODO: hier return-Anweisung eingeben
+	if (&other == this)
+		return *this;
+
+	type = other.type;
+	if (size) delete size;
+	if (obj) delete obj;
+	size = nullptr;
+	obj = nullptr;
+	if (other.size)
+	{
+		size = new SizeSpecifier;
+		*size = *other.size;
+	}
+	if (other.obj)
+	{
+		obj = new ObjectSpecifier;
+		*obj = *other.obj;
+	}
+
 	return *this;
+}
+
+ODF::TypeSpecifier ODF::Type::operator=(TypeSpecifier type)
+{
+	setType(type);
+	return type;
 }
 
 ODF::Type::Type()
@@ -293,6 +549,20 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 
 void ODF::Type::setType(TypeSpecifier type)
 {
+	if (obj) delete obj;
+	if (size) delete size;
+
+	this->type = type;
+
+	if (needsSizeSpecifier())
+		size = new SizeSpecifier;
+	else
+		size = nullptr;
+
+	if (needsObjectSpecifier())
+		obj = new ObjectSpecifier();
+	else
+		obj = nullptr;
 }
 
 inline bool ODF::Type::isPrimitive() const
@@ -303,17 +573,32 @@ inline bool ODF::Type::isPrimitive() const
 
 inline bool ODF::Type::needsObjectSpecifier() const
 {
-	return false;
+	return type.isObject();
 }
 
 inline bool ODF::Type::needsSizeSpecifier() const
 {
-	return false;
+	return type.isFixed();
 }
 
 inline bool ODF::Type::isFixed() const
 {
 	return false;
+}
+
+inline bool ODF::TypeSpecifier::isFixed() const
+{
+	return type & FLAG_FIXED;
+}
+
+inline bool ODF::TypeSpecifier::isObject() const
+{
+	return type & FLAG_OBJ;
+}
+
+inline bool ODF::TypeSpecifier::isList() const
+{
+	return type & FLAG_LIST;
 }
 
 inline bool ODF::Type::isMixed() const
@@ -703,60 +988,64 @@ ODF::Array::FixedArray::InvalidTypeChange::InvalidTypeChange(std::string message
 {
 }
 
-void ODF::Object::makeMixed()
+void ODF::Object::makeMixed() const
 {
 }
 
-bool ODF::Object::canBeFixed()
-{
-	return false;
-}
-
-bool ODF::Object::tryFixing()
+bool ODF::Object::canBeFixed() const
 {
 	return false;
 }
 
-bool ODF::Object::isMixed()
+bool ODF::Object::tryFixing() const
 {
 	return false;
 }
 
-ODF::Type ODF::Object::getFixedDatatype()
+bool ODF::Object::isMixed() const
+{
+	return false;
+}
+
+ODF::Type ODF::Object::getFixedDatatype() const
 {
 	return Type();
 }
 
-ODF::Type ODF::Object::getTargetDatatype()
+ODF::Type ODF::Object::getTargetDatatype() const
 {
 	return Type();
 }
 
-void ODF::Array::makeMixed()
+void ODF::Array::makeMixed() const
 {
 }
 
-bool ODF::Array::canBeFixed()
-{
-	return false;
-}
-
-bool ODF::Array::tryFixing()
+bool ODF::Array::canBeFixed() const
 {
 	return false;
 }
 
-bool ODF::Array::isMixed()
+bool ODF::Array::tryFixing() const
 {
 	return false;
 }
 
-ODF::Type ODF::Array::getFixedDatatype()
+bool ODF::Array::isMixed() const
+{
+	return false;
+}
+
+ODF::Type ODF::Array::getFixedDatatype() const
 {
 	return Type();
 }
 
-ODF::Type ODF::Array::getTargetDatatype()
+ODF::Type ODF::Array::getTargetDatatype() const
 {
 	return Type();
+}
+
+ODF::VariantTypeConversionError::VariantTypeConversionError(std::string message) : runtime_error(message)
+{
 }

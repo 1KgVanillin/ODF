@@ -60,9 +60,13 @@ public:
 		inline Type sizeSpec() const;
 		inline bool isSigned() const;
 		inline bool isUnsigned() const;
+		inline bool isMixed() const;
+		inline bool isFixed() const;
+		inline bool isObject() const;
+		inline bool isList() const;
 
 		operator Type() const;
-		TypeSpecifier& operator=(unsigned char uc);
+		TypeSpecifier& operator=(unsigned char byte);
 		friend TypeSpecifier operator<<(TypeSpecifier spec, unsigned char shiftBy);
 		friend TypeSpecifier operator>>(TypeSpecifier spec, unsigned char shiftBy);
 		friend TypeSpecifier operator&(TypeSpecifier spec, unsigned char byte);
@@ -150,6 +154,7 @@ public:
 	static constexpr VariantType VT_WSTR = 11;
 	static constexpr VariantType VT_OBJ = 12;
 	static constexpr VariantType VT_LIST = 13;
+	struct VariantTypeConversionError : std::runtime_error { VariantTypeConversionError(std::string message = "Invalid Conversion from type [NULL] or [undefined] to ODF::VariantType"); };
 
 	typedef std::variant<MixedObjectSpecifier, FixedObjectSpecifier> ObjectSpecifier;
 	struct Type // a full type header
@@ -173,6 +178,7 @@ public:
 
 		operator unsigned char();
 		Type& operator=(const Type& other); // TODO
+		TypeSpecifier operator=(TypeSpecifier type);
 
 		Type();
 		Type(const Type& other);
@@ -190,12 +196,12 @@ public:
 	class AbstractType
 	{
 	public:
-		virtual void makeMixed() = 0;
-		virtual bool canBeFixed() = 0;
-		virtual bool tryFixing() = 0;
-		virtual bool isMixed() = 0;
-		virtual Type getFixedDatatype() = 0;
-		virtual Type getTargetDatatype() = 0;
+		virtual void makeMixed() const = 0;
+		virtual bool canBeFixed() const = 0;
+		virtual bool tryFixing() const = 0;
+		virtual bool isMixed() const = 0;
+		virtual Type getFixedDatatype() const = 0;
+		virtual Type getTargetDatatype() const = 0;
 	};
 
 	class Object : public AbstractType
@@ -213,12 +219,12 @@ public:
 		
 		std::variant<FixedObject, MixedObject> object;
 
-		void makeMixed() override; // TODO
-		bool canBeFixed() override; // TODO
-		bool tryFixing() override; // TODO
-		bool isMixed() override; // TODO
-		Type getFixedDatatype() override; // TODO
-		Type getTargetDatatype() override; // TODO
+		void makeMixed() const override; // TODO
+		bool canBeFixed() const override; // TODO
+		bool tryFixing() const override; // TODO
+		bool isMixed() const override; // TODO
+		Type getFixedDatatype() const override; // TODO
+		Type getTargetDatatype() const override; // TODO
 	};
 	
 	class Array : public AbstractType
@@ -288,12 +294,12 @@ public:
 
 		std::variant<FixedArray, MixedArray> list;
 
-		void makeMixed() override; // TODO
-		bool canBeFixed() override; // TODO
-		bool tryFixing() override; // TODO
-		bool isMixed() override; // TODO
-		Type getFixedDatatype() override; // TODO
-		Type getTargetDatatype() override; // TODO
+		void makeMixed() const override; // TODO
+		bool canBeFixed() const override; // TODO
+		bool tryFixing() const override; // TODO
+		bool isMixed() const override; // TODO
+		Type getFixedDatatype() const override; // TODO
+		Type getTargetDatatype() const override; // TODO
 	};
 		
 
@@ -332,6 +338,42 @@ public:
 
 	template<typename T>
 	static VariantType getVariantTypeFromTemplate() {}; // TODO
+
+	// Interface
+	static bool printType;
+	ODF& operator=(const ODF& other);
+	ODF& operator=(const INT_8& val);
+	ODF& operator=(const UINT_8& val);
+	ODF& operator=(const INT_16& val);
+	ODF& operator=(const UINT_16& val);
+	ODF& operator=(const INT_32& val);
+	ODF& operator=(const UINT_32& val);
+	ODF& operator=(const INT_64& val);
+	ODF& operator=(const UINT_64& val);
+	ODF& operator=(const float& val);
+	ODF& operator=(const double& val);
+	ODF& operator=(const std::string& str);
+	ODF& operator=(const std::wstring& wstr);
+	ODF& operator=(const Object& obj);
+	ODF& operator=(const Array& arr);
+	operator INT_8();
+	operator UINT_8();
+	operator INT_16();
+	operator UINT_16();
+	operator INT_32();
+	operator UINT_32();
+	operator INT_64();
+	operator UINT_64();
+	operator float();
+	operator double();
+	operator std::string();
+	operator std::wstring();
+	operator Object();
+	operator Array();
+	friend std::ostream& operator<<(std::ostream& out, const ODF& odf);
+	friend std::ostream& operator<<(std::ostream& out, const Object& obj);
+	friend std::ostream& operator<<(std::ostream& out, const Array& list);
+	friend std::ostream& operator<<(std::ostream& out, const std::wstring& wstr);
 
 	// Operators
 	friend bool operator== (const ODF& odf1, const ODF& odf2); // TODO
