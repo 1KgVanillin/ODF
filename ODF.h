@@ -64,6 +64,7 @@ public:
 		inline bool isFixed() const;
 		inline bool isObject() const;
 		inline bool isList() const;
+		inline Type smallType() const;
 
 		operator Type() const;
 		TypeSpecifier& operator=(unsigned char byte);
@@ -75,10 +76,8 @@ public:
 		TypeSpecifier(Type t = 0);
 
 		// TODO change values to new notation (see v2.md)
-		static constexpr Type FLAG_FIXED = 0;
 		static constexpr Type FLAG_MIXED = 0b0010'0000;
 		static constexpr Type FLAG_UNSIGNED = 0b0010'0000;
-		static constexpr Type FLAG_SIGNED = 0;
 		static constexpr Type FLAG_HIGH_PREC = 0b0010'0000;
 		static constexpr Type FLAG_LOW_PREC = 0;
 		static constexpr Type FLAG_NULL = 0;
@@ -90,23 +89,23 @@ public:
 		static constexpr Type FLAG_STRING = 6;
 		static constexpr Type FLAG_OBJ = 7;
 		static constexpr Type FLAG_LIST = 8;
-		static constexpr Type NULLTYPE = FLAG_NULL | FLAG_FIXED;
+		static constexpr Type NULLTYPE = FLAG_NULL;
 		static constexpr Type UNDEFINED = FLAG_NULL | FLAG_MIXED;
-		static constexpr Type BYTE = FLAG_BYTE | FLAG_SIGNED;
+		static constexpr Type BYTE = FLAG_BYTE;
 		static constexpr Type UBYTE = FLAG_BYTE | FLAG_UNSIGNED;
-		static constexpr Type SHORT = FLAG_SHORT | FLAG_SIGNED;
+		static constexpr Type SHORT = FLAG_SHORT;
 		static constexpr Type USHORT = FLAG_SHORT | FLAG_UNSIGNED;
-		static constexpr Type INT = FLAG_INT | FLAG_SIGNED;
+		static constexpr Type INT = FLAG_INT;
 		static constexpr Type UINT = FLAG_INT | FLAG_UNSIGNED;
-		static constexpr Type LONG = FLAG_LONG | FLAG_SIGNED;
+		static constexpr Type LONG = FLAG_LONG;
 		static constexpr Type ULONG = FLAG_LONG | FLAG_UNSIGNED;
 		static constexpr Type FLOAT = FLAG_FLOATING_POINT_TYPE | FLAG_LOW_PREC;
 		static constexpr Type DOUBLE = FLAG_FLOATING_POINT_TYPE | FLAG_HIGH_PREC;
 		static constexpr Type CSTR = FLAG_STRING | FLAG_LOW_PREC;
 		static constexpr Type WSTR = FLAG_STRING | FLAG_HIGH_PREC;
-		static constexpr Type FXOBJ = FLAG_OBJ | FLAG_FIXED;
+		static constexpr Type FXOBJ = FLAG_OBJ;
 		static constexpr Type MXOBJ = FLAG_OBJ | FLAG_MIXED;
-		static constexpr Type FXLIST = FLAG_LIST | FLAG_FIXED;
+		static constexpr Type FXLIST = FLAG_LIST;
 		static constexpr Type MXLIST = FLAG_LIST | FLAG_MIXED;
 	};
 
@@ -138,6 +137,12 @@ public:
 		void saveToMemory(MemoryDataStream& mem) const;
 	};
 
+	struct ArraySpecifier
+	{
+		SizeSpecifier size;
+		Type* forcedType; // nullptr if mixed, forcedType if fixed
+	};
+
 	// variant type definitions
 	typedef size_t VariantType;
 	static constexpr VariantType VT_INT8 = 0;
@@ -160,8 +165,7 @@ public:
 	struct Type // a full type header
 	{ // pointers are used as optionals. Deallocated in destructor
 		TypeSpecifier type;
-		ObjectSpecifier* obj;
-		SizeSpecifier* size;
+		std::variant<ObjectSpecifier, ArraySpecifier>* complexspec; // holds object specification optionallly
 
 		void clear(); // deletes every optional specifier
 		Status saveToMemory(MemoryDataStream& mem) const;
@@ -173,7 +177,7 @@ public:
 		inline bool isFixed() const; // TODO
 		inline bool isMixed() const; // TODO
 		bool isString() const; // TODO
-		inline unsigned char getswitch() const; // gets the switch() case compatible Type (without SizeSpecifier)
+		inline TypeSpecifier getswitch() const; // gets the switch() case compatible Type (without SizeSpecifier)
 		inline VariantType getVariantType() const; // TODO
 
 		operator unsigned char();
@@ -226,30 +230,32 @@ public:
 		Type getFixedDatatype() const override; // TODO
 		Type getTargetDatatype() const override; // TODO
 	};
+
+
+	// The AbstractArray is an implementation of the mixed array.
+	// The mixedArray inherits everything from it.
+	// The FixedArray inherits erase, etc. and overwrites the push and insert functions to make a fixed check
+	class AbstractArray
+	{
+	protected:
+		std::vector<ODF> list;
+	public:
+		virtual void push_back(const ODF& odf);
+		virtual void push_front(const ODF& odf);
+		virtual void erase(size_t index);
+		virtual void erase(size_t index, size_t numberOfElements);
+		virtual void erase_range(size_t from, size_t to);
+		virtual void insert(size_t where, const ODF& odf);
+		virtual size_t find(const ODF& odf);
+		virtual size_t size() const;
+
+		virtual ODF& operator[](size_t index);
+		virtual const ODF& operator[](size_t index) const;
+	};
 	
-	class Array : public AbstractType
+	class Array : public AbstractType, AbstractArray
 	{
 	public:
-		// The AbstractArray is an implementation of the mixed array.
-		// The mixedArray inherits everything from it.
-		// The FixedArray inherits erase, etc. and overwrites the push and insert functions to make a fixed check
-		class AbstractArray
-		{
-		protected:
-			std::vector<ODF> list;
-		public:
-			virtual void push_back(const ODF& odf);
-			virtual void push_front(const ODF& odf);
-			virtual void erase(size_t index);
-			virtual void erase(size_t index, size_t numberOfElements);
-			virtual void erase_range(size_t from, size_t to);
-			virtual void insert(size_t where, const ODF& odf);
-			virtual size_t find(const ODF& odf);
-			virtual size_t size() const;
-
-			ODF& operator[](size_t index);
-			const ODF& operator[](size_t index) const;
-		};
 
 		class FixedArray : public AbstractArray
 		{
@@ -264,7 +270,7 @@ public:
 			void convert(std::function<T(const ODF& odf)> converter); // TODO
 
 			void setType(const Type& type); // can only be called on an empty list, otherwise throws exception // TODO
-			const Type& getType(); // TODO
+			const Type& getType() const; // TODO
 
 			void enableFailRegistry(bool enable = true); // TODO
 			bool fail() const;
@@ -294,12 +300,28 @@ public:
 
 		std::variant<FixedArray, MixedArray> list;
 
+		// type functions
+		void clearAndFix(); // clear and make fixed
+		void clearAndFix(const Type& elementType); // clear and make fixed
+		void clearAndMix(); // clear and make mixed
 		void makeMixed() const override; // TODO
 		bool canBeFixed() const override; // TODO
 		bool tryFixing() const override; // TODO
 		bool isMixed() const override; // TODO
-		Type getFixedDatatype() const override; // TODO
-		Type getTargetDatatype() const override; // TODO
+		Type getFixedDatatype() const override; // TODO, called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
+		Type getTargetDatatype() const override; // TODO, called on mixed list, returns the datatype that every element would have if converted to fixed. THrows std::bad_variant_access if called on fixed
+
+		// List functions
+		void push_back(const ODF& odf) override;
+		void push_front(const ODF& odf) override;
+		void erase(size_t index) override;
+		void erase(size_t index, size_t numberOfElements) override;
+		void erase_range(size_t from, size_t to) override;
+		void insert(size_t where, const ODF& odf) override;
+		size_t find(const ODF& odf) override;
+		size_t size() const override;
+		ODF& operator[](size_t index) override;
+		const ODF& operator[](size_t index) const override;
 	};
 		
 
@@ -342,16 +364,16 @@ public:
 	// Interface
 	static bool printType;
 	ODF& operator=(const ODF& other);
-	ODF& operator=(const INT_8& val);
-	ODF& operator=(const UINT_8& val);
-	ODF& operator=(const INT_16& val);
-	ODF& operator=(const UINT_16& val);
-	ODF& operator=(const INT_32& val);
-	ODF& operator=(const UINT_32& val);
-	ODF& operator=(const INT_64& val);
-	ODF& operator=(const UINT_64& val);
-	ODF& operator=(const float& val);
-	ODF& operator=(const double& val);
+	ODF& operator=(INT_8 val);
+	ODF& operator=(UINT_8 val);
+	ODF& operator=(INT_16 val);
+	ODF& operator=(UINT_16 val);
+	ODF& operator=(INT_32 val);
+	ODF& operator=(UINT_32 val);
+	ODF& operator=(INT_64 val);
+	ODF& operator=(UINT_64 val);
+	ODF& operator=(float val);
+	ODF& operator=(double val);
 	ODF& operator=(const std::string& str);
 	ODF& operator=(const std::wstring& wstr);
 	ODF& operator=(const Object& obj);
@@ -370,10 +392,47 @@ public:
 	operator std::wstring();
 	operator Object();
 	operator Array();
+	ODF();
+	ODF(const ODF& other);
+	ODF(INT_8 val);
+	ODF(UINT_8 val);
+	ODF(INT_16 val);
+	ODF(UINT_16 val);
+	ODF(INT_32 val);
+	ODF(UINT_32 val);
+	ODF(INT_64 val);
+	ODF(UINT_64 val);
+	ODF(float val);
+	ODF(double val);
+	ODF(const std::string& str);
+	ODF(const char* cstr);
+	ODF(const std::wstring& wstr);
+	ODF(const wchar_t* wstr);
+	ODF(const Object& obj);
+	ODF(const Array& arr);
 	friend std::ostream& operator<<(std::ostream& out, const ODF& odf);
 	friend std::ostream& operator<<(std::ostream& out, const Object& obj);
 	friend std::ostream& operator<<(std::ostream& out, const Array& list);
 	friend std::ostream& operator<<(std::ostream& out, const std::wstring& wstr);
+	friend std::ostream& operator<<(std::ostream& out, const Type& type);
+
+	// list functions
+	void makeList(bool fixed); // clears content and converts element to a list
+	void makeList(const Type& elementType); // clears content and converts to fxlist of with elementtype
+	void push_back(const ODF& odf);
+	void push_front(const ODF& odf);
+	void erase(size_t index);
+	void erase(size_t index, size_t numberOfElements);
+	void erase_range(size_t from, size_t to);
+	void insert(size_t where, const ODF& odf);
+	size_t find(const ODF& odf);
+	bool push_back_nothrow(const ODF& odf) noexcept;
+	bool push_front_nothrow(const ODF& odf) noexcept;
+	bool erase_nothrow(size_t index) noexcept;
+	bool erase_nothrow(size_t index, size_t numberOfElements) noexcept;
+	bool erase_range_nothrow(size_t from, size_t to) noexcept;
+	bool insert_nothrow(size_t where, const ODF& odf) noexcept;
+	size_t find_nothrow(const ODF& odf) noexcept;
 
 	// Operators
 	friend bool operator== (const ODF& odf1, const ODF& odf2); // TODO
@@ -399,6 +458,7 @@ private:
 	Status loadObject(MemoryDataStream& mem);
 	Status loadArray(MemoryDataStream& mem);
 };
+
 
 #include "ODF.tpp"
 

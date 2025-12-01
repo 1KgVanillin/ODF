@@ -25,6 +25,8 @@ int main()
 
 		ODF o2;
 		o2.loadFromMemory(read);
+		o2.makeList(ODF::TypeSpecifier::BYTE);
+		o2.push_back(5);
 
 		cout << "\n\nresult: " << odf << " // " << o2 << "\n\n";
 
