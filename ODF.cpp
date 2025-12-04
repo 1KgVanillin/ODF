@@ -5,20 +5,35 @@ bool ODF::printType = true;
 #pragma region specifiers
 ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 {
+	// specifier priorities:
+	// 1. Type
+	// 2. Fixtype
+	// 3. Object or Size
+
 	// save primitive type
-	mem.write<unsigned char>(type.byte());
+	mem.write<unsigned char>(type.byte()); // Prio 1
 
-	// save specifiers
-	if (needsSizeSpecifier())
-		size->save(mem);
-
-	if (needsObjectSpecifier())
+	if (complexspec)
 	{
-		// check ObjecSpecifier Type and save it
-		if (auto ptr = std::get_if<MixedObjectSpecifier>(obj))
-			ptr->saveToMemory(mem);
-		else if (auto ptr = std::get_if<FixedObjectSpecifier>(obj))
-			ptr->saveToMemory(mem);
+		if (auto ptr = std::get_if<ObjectSpecifier>(complexspec))
+		{
+			// save object specifier
+			if (auto fixed = std::get_if<FixedObjectSpecifier>(ptr))
+			{
+				fixed->saveToMemory(mem); // save prio 2 and 3
+			}
+			else if (auto mixed = std::get_if<MixedObjectSpecifier>(ptr))
+			{
+				mixed->saveToMemory(mem); // skip prio 2, save 3
+			}
+		}
+		else if (auto ptr = std::get_if<ArraySpecifier>(complexspec))
+		{
+			// save array specifier
+			if (ptr->forcedType)
+				ptr->forcedType->saveToMemory(mem); // save prio 2
+			ptr->size.saveToMemory(mem); // prio 4
+		}
 	}
 
 	return Status::Ok;
@@ -27,20 +42,13 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 {
 	// load primitive type
-	type = mem.read<unsigned char>();
+	type = mem.read<unsigned char>(); // prio 1
 
-	// check for size specifier
-	if (needsSizeSpecifier())
-		size->load(mem, type);
+	Type* fixtype = nullptr;
+	if (isFixed())
+		fixtype->loadFromMemory(mem);
 
-	// check for object specifier
-	if (needsObjectSpecifier())
-	{
-		if (auto ptr = std::get_if<MixedObjectSpecifier>(obj))
-			ptr->saveToMemory(mem);
-		else if (auto ptr = std::get_if<FixedObjectSpecifier>(obj))
-			ptr->saveToMemory(mem);
-	}
+	// save object and size specifiers TODO
 
 	return Status::Ok;
 }
@@ -133,6 +141,9 @@ std::ostream& operator<<(std::ostream& out, const ODF::Array& list)
 {
 	if (list.isMixed())
 	{
+		size_t i = 0;
+		for (const ODF& odf : list.getIterationContinainer())
+			out << i++ << ": " << odf << "\n";
 	}
 	else
 	{
@@ -567,8 +578,7 @@ ODF::Type::Type()
 
 ODF::Type::Type(const Type& other)
 {
-	size = nullptr;
-	obj = nullptr;
+	complexspec = nullptr;
 	*this = other;
 }
 
@@ -635,7 +645,7 @@ void ODF::SizeSpecifier::load(MemoryDataStream& stream, TypeSpecifier type)
 	}
 }
 
-void ODF::SizeSpecifier::save(MemoryDataStream& stream, TypeSpecifier type) const
+void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const
 {
 	switch (type % 4)
 	{
@@ -654,9 +664,9 @@ void ODF::SizeSpecifier::save(MemoryDataStream& stream, TypeSpecifier type) cons
 	}
 }
 
-void ODF::SizeSpecifier::save(MemoryDataStream& stream) const
+void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& stream) const
 {
-	save(stream, sizeSpecifierSpecifier());
+	saveToMemory(stream, sizeSpecifierSpecifier());
 }
 
 #pragma endregion
@@ -722,7 +732,7 @@ inline bool ODF::Type::needsSizeSpecifier() const
 
 inline bool ODF::Type::isFixed() const
 {
-	return false;
+	return !isMixed();
 }
 
 inline bool ODF::TypeSpecifier::isMixed() const
@@ -1110,6 +1120,11 @@ const ODF& ODF::AbstractArray::operator[](size_t index) const
 	return list[index];
 }
 
+std::vector<ODF>& ODF::AbstractArray::getIterationContinainer()
+{
+	return list;
+}
+
 void ODF::Array::FixedArray::push_back(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
@@ -1398,6 +1413,16 @@ ODF& ODF::Array::operator[](size_t index)
 const ODF& ODF::Array::operator[](size_t index) const
 {
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
+}
+
+const std::vector<ODF>& ODF::Array::getIterationContinainer()
+{
+	if (auto ptr = std::get_if<MixedArray>(&list))
+		return ptr->getIterationContinainer();
+	else if (auto ptr = std::get_if<FixedArray>(&list))
+		return ptr->getIterationContinainer();
+	else
+		return *(std::vector<ODF>*)nullptr; // should never be reached. Fuck this.
 }
 
 ODF::VariantTypeConversionError::VariantTypeConversionError(std::string message) : runtime_error(message)

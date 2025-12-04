@@ -119,8 +119,8 @@ public:
 
 		TypeSpecifier sizeSpecifierSpecifier() const; // wow. Use like TypeSpecifier =	
 		void load(MemoryDataStream& stream, TypeSpecifier type);
-		void save(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
-		void save(MemoryDataStream& stream) const; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
+		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
+		void saveToMemory(MemoryDataStream& stream) const; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
 	};
 
 	struct MixedObjectSpecifier
@@ -251,6 +251,7 @@ public:
 
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
+		virtual const std::vector<ODF>& getIterationContinainer() const;
 	};
 	
 	class Array : public AbstractType, AbstractArray
@@ -322,6 +323,7 @@ public:
 		size_t size() const override;
 		ODF& operator[](size_t index) override;
 		const ODF& operator[](size_t index) const override;
+		const std::vector<ODF>& getIterationContinainer() const override;
 	};
 		
 
