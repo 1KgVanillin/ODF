@@ -176,10 +176,9 @@ std::ostream& operator<<(std::ostream& out, const ODF::Type& type)
 	case TS::DOUBLE: out << "DOUBLE"; return out;
 	case TS::CSTR: out << "CSTR"; return out;
 	case TS::WSTR: out << "WSTR"; return out;
-	case TS::FXOBJ: out << "FXOBJ(" << std::get<ODF::FixedObjectSpecifier>(*type.obj).header << ")"; return out;
+	//case TS::FXOBJ: out << "FXOBJ(" << std::get<ODF::FixedObjectSpecifier>(*type.obj).header << ")"; return out;
 	case TS::MXOBJ: out << "MXOBJ"; return out;
-	case TS::FXLIST: out << "FXLST" << 
-	case TS::UBYTE: out << "[UBYTE]"; return out;
+	case TS::FXLIST: out << "FXLST"; return out;
 	}
 	return out;
 }

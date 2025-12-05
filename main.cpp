@@ -24,9 +24,7 @@ int main()
 		odf.saveToMemory(write);
 
 		ODF o2;
-		o2.loadFromMemory(read);
-		o2.makeList(ODF::TypeSpecifier::BYTE);
-		o2.push_back(5);
+		o2.loadFromMemory(data, 100);
 
 		cout << "\n\nresult: " << odf << " // " << o2 << "\n\n";
 
