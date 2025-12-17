@@ -46,9 +46,24 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 
 	Type* fixtype = nullptr;
 	if (isFixed())
-		fixtype->loadFromMemory(mem);
+		fixtype->loadFromMemory(mem); // prio 2
 
 	// save object and size specifiers TODO
+	if (auto ptr = std::get_if<ObjectSpecifier>(complexspec)) // prio 3
+	{
+		if (auto obj = std::get_if<FixedObjectSpecifier>(ptr))
+		{
+			obj->saveToMemory(mem);
+		}
+		else if (auto obj = std::get_if<MixedObjectSpecifier>(ptr))
+		{
+			obj->saveToMemory(mem);
+		}
+	}
+	if (auto ptr = std::get_if<SizeSpecifier>(complexspec)) // prio 4
+	{
+		ptr->saveToMemory(mem);
+	}
 
 	return Status::Ok;
 }
@@ -697,20 +712,24 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 
 void ODF::Type::setType(TypeSpecifier type)
 {
-	if (obj) delete obj;
-	if (size) delete size;
+	if (complexspec) delete complexspec;
 
 	this->type = type;
 
-	if (needsSizeSpecifier())
-		size = new SizeSpecifier;
-	else
-		size = nullptr;
+	complexspec = isPrimitive() ? nullptr : new std::variant<ObjectSpecifier, ArraySpecifier>;
 
 	if (needsObjectSpecifier())
-		obj = new ObjectSpecifier();
+	{
+		complexspec->emplace<ObjectSpecifier>();
+		if (isFixed())
+			std::get<ObjectSpecifier>(*complexspec).emplace<FixedObjectSpecifier>();
+		else
+			std::get<ObjectSpecifier>(*complexspec).emplace<MixedObjectSpecifier>();
+	}
 	else
-		obj = nullptr;
+	{
+		complexspec->emplace<ArraySpecifier>();
+	}
 }
 
 inline bool ODF::Type::isPrimitive() const
