@@ -7,33 +7,35 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 {
 	// specifier priorities:
 	// 1. Type
-	// 2. Fixtype
-	// 3. Object or Size
+	// 2. Size
+	// 3. Fixtype
+	// 4. Object
 
 	// save primitive type
 	mem.write<unsigned char>(type.byte()); // Prio 1
 
 	if (complexspec)
 	{
-		if (auto ptr = std::get_if<ObjectSpecifier>(complexspec))
+		if (auto ptr = std::get_if<ArraySpecifier>(complexspec))
+		{
+			ptr->size.saveToMemory(mem); // prio 2
+
+			// save fixtype if existing
+			if (ptr->forcedType)
+				ptr->forcedType->saveToMemory(mem); // save prio 3 (resursion occurs here btw)
+		}
+		else if (auto ptr = std::get_if<ObjectSpecifier>(complexspec))
 		{
 			// save object specifier
 			if (auto fixed = std::get_if<FixedObjectSpecifier>(ptr))
 			{
-				fixed->saveToMemory(mem); // save prio 2 and 3
+				fixed->saveToMemory(mem); // Size is implied by the number of keys
 			}
 			else if (auto mixed = std::get_if<MixedObjectSpecifier>(ptr))
 			{
 				mixed->saveToMemory(mem); // skip prio 2, save 3
 			}
-		}
-		else if (auto ptr = std::get_if<ArraySpecifier>(complexspec))
-		{
-			// save array specifier
-			if (ptr->forcedType)
-				ptr->forcedType->saveToMemory(mem); // save prio 2
-			ptr->size.saveToMemory(mem); // prio 4
-		}
+		}		
 	}
 
 	return Status::Ok;
@@ -41,15 +43,24 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 
 ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 {
-	// load primitive type
+	// load primitive type specifier, to allow isFixed() check
 	type = mem.read<unsigned char>(); // prio 1
 
+	if (auto ptr = std::get_if<ArraySpecifier>(complexspec)) // prio 2
+	{
+		ptr->size.saveToMemory(mem);
+	}
+
+	// now load the fixtype information and allocate it
 	Type* fixtype = nullptr;
 	if (isFixed())
-		fixtype->loadFromMemory(mem); // prio 2
+	{
+		fixtype = new Type;
+		fixtype->loadFromMemory(mem); // prio 3
+	}
 
 	// save object and size specifiers TODO
-	if (auto ptr = std::get_if<ObjectSpecifier>(complexspec)) // prio 3
+	if (auto ptr = std::get_if<ObjectSpecifier>(complexspec)) // prio 4
 	{
 		if (auto obj = std::get_if<FixedObjectSpecifier>(ptr))
 		{
@@ -59,10 +70,6 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 		{
 			obj->saveToMemory(mem);
 		}
-	}
-	if (auto ptr = std::get_if<SizeSpecifier>(complexspec)) // prio 4
-	{
-		ptr->saveToMemory(mem);
 	}
 
 	return Status::Ok;
@@ -604,20 +611,46 @@ ODF::Type::~Type()
 #pragma region ObjectSpecifier
 void ODF::MixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 {
-	// see documentation "Mixed Object Specifier"
-	for (const auto& pair_it : properties)
+	// CSTR key
+	// TypeHeader value
+	// empty key (just null terminator) = end of specifier
+	for (ObjectIterator it : properties)
 	{
 		// save key
-		mem.writeStr(pair_it.first);
+		mem.writeStr(it.first);
 		// save type
-		pair_it.second->saveToMemory(mem);
+		it.second.saveToMemory(mem);
 	}
 	// save zero to end object specifier
 	mem.write<UINT_8>(0);
 }
 
+void ODF::MixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem)
+{
+	properties.clear();
+	std::string key;
+	
+	while (mem.peek())
+	{
+		key = mem.readStr();
+		Type type;
+		type.loadFromMemory(mem);
+		properties[key] = type;
+	}
+}
+
 void ODF::FixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 {
+	// format:
+	// TYPE type
+	// CSTR key1
+	// CSTR key2
+	// ...
+	// empty key = end
+
+	if (!header)
+		throw 0; // TODO
+
 	// save type
 	header->saveToMemory(mem);
 	// save keys
@@ -626,18 +659,43 @@ void ODF::FixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 	// save zero to end specifier
 	mem.write<UINT_8>(0);
 }
+
+void ODF::FixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem)
+{
+	// prepare object for reading
+	keys.clear();
+	if (header)
+		delete header;
+	header = new Type;
+	
+	// load header
+	header->loadFromMemory(mem);
+
+	// read keys until a zero terminator
+	while (mem.peek())
+		keys.push_back(mem.readStr());
+}
+
+ODF::FixedObjectSpecifier::FixedObjectSpecifier() : header(nullptr) {}
+
+ODF::FixedObjectSpecifier::~FixedObjectSpecifier()
+{
+	if (header)
+		delete header;
+}
+
 #pragma endregion
 #pragma region SizeSpecifier
-ODF::TypeSpecifier ODF::SizeSpecifier::sizeSpecifierSpecifier() const
+ODF::TypeSpecifier ODF::SizeSpecifier::sizeSpecifierSpecifier(TypeSpecifier original) const
 {
 	if (actualSize < OverflowSize8bit)
-		return 0b00;
+		return 0b00'000000 | original;
 	else if (actualSize < OverflowSize16bit)
-		return 0b01;
+		return 0b01'000000 | original;
 	else if (actualSize < OverflowSize32bit)
-		return 0b10;
+		return 0b10'000000 | original;
 	else
-		return 0b11;
+		return 0b11'000000 | original;
 }
 
 void ODF::SizeSpecifier::load(MemoryDataStream& stream, TypeSpecifier type)
@@ -681,6 +739,11 @@ void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& stream, TypeSpecifier ty
 void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& stream) const
 {
 	saveToMemory(stream, sizeSpecifierSpecifier());
+}
+
+void ODF::SizeSpecifier::loadFromMemory(MemoryDataStream& mem)
+{
+	THROW 6767; // 67
 }
 
 #pragma endregion
@@ -1138,11 +1201,6 @@ const ODF& ODF::AbstractArray::operator[](size_t index) const
 	return list[index];
 }
 
-std::vector<ODF>& ODF::AbstractArray::getIterationContinainer()
-{
-	return list;
-}
-
 void ODF::Array::FixedArray::push_back(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
@@ -1433,7 +1491,7 @@ const ODF& ODF::Array::operator[](size_t index) const
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
 }
 
-const std::vector<ODF>& ODF::Array::getIterationContinainer()
+const std::vector<ODF>& ODF::Array::getIterationContinainer() const
 {
 	if (auto ptr = std::get_if<MixedArray>(&list))
 		return ptr->getIterationContinainer();
@@ -1444,5 +1502,9 @@ const std::vector<ODF>& ODF::Array::getIterationContinainer()
 }
 
 ODF::VariantTypeConversionError::VariantTypeConversionError(std::string message) : runtime_error(message)
+{
+}
+
+void ODF::ArraySpecifier::saveToMemory(MemoryDataStream& mem) const
 {
 }

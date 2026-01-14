@@ -95,7 +95,7 @@ public:
 	void writeStr(std::string str);
 	void writeWstr(std::wstring wstr);
 
-	char peek() const;
+	char peek();
 	void peek(char* destination, size_t size);
 	char read();
 	void read(char* destination, size_t size);
@@ -104,14 +104,14 @@ public:
 	size_t size();
 	size_t sizeLeft();
 	template<typename T>
-	T read()
+	T read() const
 	{
 		T content{};
 		read((char*)&content, sizeof(content));
 		return content;
 	}
 	template<typename T>
-	T peek()
+	T peek() const
 	{
 		T content{};
 		peek((char*)&content, sizeof(content));

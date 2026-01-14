@@ -324,7 +324,7 @@ void MemoryDataStream::writeWstr(std::wstring wstr)
 	write((char*)wstr.c_str(), (wstr.size() + 1) * sizeof(wchar_t)); // 1000 IQ because reusing the null terminator
 }
 
-char MemoryDataStream::peek() const
+char MemoryDataStream::peek()
 {
 	if (current < firstInvalidAddress || insecure)
 		return *current;

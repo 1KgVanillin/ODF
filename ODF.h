@@ -51,7 +51,14 @@ public:
 		Status(Value val = Status::Ok);
 	};
 
-	class TypeSpecifier // THe size specifier specifier is removed automatically when impicitely used.
+	class AbstractSpecifier
+	{
+	public:
+		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem) = 0;
+	};
+
+	class TypeSpecifier : public AbstractSpecifier // The size specifier specifier is removed automatically when impicitely used.
 	{
 	public:
 		typedef unsigned char Type;
@@ -65,6 +72,9 @@ public:
 		inline bool isObject() const;
 		inline bool isList() const;
 		inline Type smallType() const;
+
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
 
 		operator Type() const;
 		TypeSpecifier& operator=(unsigned char byte);
@@ -109,7 +119,7 @@ public:
 		static constexpr Type MXLIST = FLAG_LIST | FLAG_MIXED;
 	};
 
-	struct SizeSpecifier
+	struct SizeSpecifier : public AbstractSpecifier
 	{
 		static constexpr size_t OverflowSize8bit = 256;
 		static constexpr size_t OverflowSize16bit = 65'536;
@@ -117,30 +127,40 @@ public:
 		// no OverflowSize64bit, as it would be zero on a 64bit system
 		size_t actualSize;
 
-		TypeSpecifier sizeSpecifierSpecifier() const; // wow. Use like TypeSpecifier =	
+		TypeSpecifier sizeSpecifierSpecifier(TypeSpecifier original) const; // wow. Use like type = spec.sizeSpecSpec(type)
 		void load(MemoryDataStream& stream, TypeSpecifier type);
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
-		void saveToMemory(MemoryDataStream& stream) const; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
+		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
+		void loadFromMemory(MemoryDataStream& mem) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
 	};
 
-	struct MixedObjectSpecifier
+	struct MixedObjectSpecifier : public AbstractSpecifier
 	{
-		typedef std::pair<std::string, Type> IteratorType;
-		std::map<std::string, Type*> properties; // use an ordered map to ensure iteration order is always the same.
-		void saveToMemory(MemoryDataStream& mem) const;
+		typedef const std::pair<std::string, Type>& ObjectIterator;
+		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
-	struct FixedObjectSpecifier
+	struct FixedObjectSpecifier : public AbstractSpecifier
 	{
 		Type* header;
 		std::vector<std::string> keys;
-		void saveToMemory(MemoryDataStream& mem) const;
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
+
+		FixedObjectSpecifier();
+		~FixedObjectSpecifier();
 	};
 
-	struct ArraySpecifier
+	// The ArraySpecifier holds all type information that is needed to load or save an array.
+	// saves or loads the size specifier on save. Maybe remove the AbstractSpecifier inheritance
+	struct ArraySpecifier : public AbstractSpecifier
 	{
 		SizeSpecifier size;
 		Type* forcedType; // nullptr if mixed, forcedType if fixed
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
 	// variant type definitions
@@ -251,7 +271,7 @@ public:
 
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
-		virtual const std::vector<ODF>& getIterationContinainer() const;
+		virtual const std::vector<ODF>& getIterationContinainer() const; // TODO
 	};
 	
 	class Array : public AbstractType, AbstractArray
