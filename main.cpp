@@ -35,10 +35,10 @@ int main()
 		std::cout << "runtime error: " << err.what() << "\n";
 		return 0;
 	}
-	catch (...)
+	/*catch (...)
 	{
 		std::cout << "unknown error";
 		rethrow;
 		return 0;
-	}
+	}*/
 }

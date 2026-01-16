@@ -104,19 +104,21 @@ public:
 	size_t size();
 	size_t sizeLeft();
 	template<typename T>
-	T read() const
+	T read()
 	{
 		T content{};
 		read((char*)&content, sizeof(content));
 		return content;
 	}
 	template<typename T>
-	T peek() const
+	T peek()
 	{
 		T content{};
 		peek((char*)&content, sizeof(content));
 		return content;
 	}
+	char peekPrevious() const;
+	void setPrevious(char byte);
 
 	MemoryDataStream(size_t size = 0); // allocates own data, if 0 specified, dynamic allocation on write() calls.
 	MemoryDataStream(char* data);

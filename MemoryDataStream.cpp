@@ -395,6 +395,24 @@ size_t MemoryDataStream::sizeLeft()
 	return firstInvalidAddress - current;
 }
 
+char MemoryDataStream::peekPrevious() const
+{
+	if (current <= start)
+	{
+		THROW std::out_of_range("Out of range exception in MemoryDataStream::peekPrevious() : no provious byte available");
+	}
+	return *(current - 1);
+}
+
+void MemoryDataStream::setPrevious(char byte)
+{
+	if (current <= start)
+	{
+		THROW std::out_of_range("Out of range exception in MemoryDataStream::setPrevious() : no provious byte available");
+	}
+	*(current - 1) = byte;
+}
+
 MemoryDataStream::MemoryDataStream(size_t size)
 {
 	allocate(size);

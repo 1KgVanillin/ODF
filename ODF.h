@@ -26,6 +26,22 @@
 class DF_API ODF // optimized object format
 {
 public:
+	// error types
+	
+	// generic development exception
+	struct SixSeven : public std::runtime_error
+	{
+		SixSeven(const std::string& message = "67 (six - seven)");
+	};
+	// Thrown if a member function that is fixed on a specific type is called for an invalid type
+	// For example if push_back would be called on a non list element
+	struct TypeMismatch : public std::runtime_error
+	{
+		TypeMismatch(const std::string& message = "TypeMismatch exception");
+	};
+
+
+
 	// random constants
 	static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
 
@@ -72,6 +88,7 @@ public:
 		inline bool isObject() const;
 		inline bool isList() const;
 		inline Type smallType() const;
+		inline Type withoutSSS() const; // without size specifier specifier
 
 		void saveToMemory(MemoryDataStream& mem) const override;
 		void loadFromMemory(MemoryDataStream& mem) override;
@@ -127,7 +144,7 @@ public:
 		// no OverflowSize64bit, as it would be zero on a 64bit system
 		size_t actualSize;
 
-		TypeSpecifier sizeSpecifierSpecifier(TypeSpecifier original) const; // wow. Use like type = spec.sizeSpecSpec(type)
+		TypeSpecifier sizeSpecifierSpecifier(TypeSpecifier original = 0) const; // wow. Use like type = spec.sizeSpecSpec(type). Selects the sizeSpecifierSpecifier as the smallest value possible that still fits
 		void load(MemoryDataStream& stream, TypeSpecifier type);
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
 		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
@@ -144,7 +161,7 @@ public:
 
 	struct FixedObjectSpecifier : public AbstractSpecifier
 	{
-		Type* header;
+		Type* fixType;
 		std::vector<std::string> keys;
 		void saveToMemory(MemoryDataStream& mem) const override;
 		void loadFromMemory(MemoryDataStream& mem) override;
@@ -154,11 +171,19 @@ public:
 	};
 
 	// The ArraySpecifier holds all type information that is needed to load or save an array.
-	// saves or loads the size specifier on save. Maybe remove the AbstractSpecifier inheritance
-	struct ArraySpecifier : public AbstractSpecifier
+	// saves or loads the size specifier on save
+	struct FixedArraySpecifier : public AbstractSpecifier
 	{
 		SizeSpecifier size;
-		Type* forcedType; // nullptr if mixed, forcedType if fixed
+		Type* fixType; // nullptr if mixed, forcedType if fixed
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
+	};
+
+	struct MixedArraySpecifier : public AbstractSpecifier
+	{
+		std::vector<Type> types;
+
 		void saveToMemory(MemoryDataStream& mem) const override;
 		void loadFromMemory(MemoryDataStream& mem) override;
 	};
@@ -182,10 +207,12 @@ public:
 	struct VariantTypeConversionError : std::runtime_error { VariantTypeConversionError(std::string message = "Invalid Conversion from type [NULL] or [undefined] to ODF::VariantType"); };
 
 	typedef std::variant<MixedObjectSpecifier, FixedObjectSpecifier> ObjectSpecifier;
+	typedef std::variant<MixedArraySpecifier, FixedArraySpecifier> ArraySpecifier;
 	struct Type // a full type header
 	{ // pointers are used as optionals. Deallocated in destructor
 		TypeSpecifier type;
-		std::variant<ObjectSpecifier, ArraySpecifier>* complexspec; // holds object specification optionallly
+		typedef std::variant<ObjectSpecifier, ArraySpecifier> ComplexSpecifier;
+		ComplexSpecifier* complexSpec; // holds object specification optionallly
 
 		void clear(); // deletes every optional specifier
 		Status saveToMemory(MemoryDataStream& mem) const;
@@ -200,8 +227,12 @@ public:
 		inline TypeSpecifier getswitch() const; // gets the switch() case compatible Type (without SizeSpecifier)
 		inline VariantType getVariantType() const; // TODO
 
+		void destroyComplexSpec();
+		void makeComplexSpec(); // memory leak safe. Makes sure complexSpec is valid, keeps the old one if one is already existing
+		void resetComplexSpec(); // memory leak safe. If an old complexSpec exists it gets destroyed, then a fresh one is allcated. Maybe fix performace of this by keeping and overwriting the old object? TODO
+
 		operator unsigned char();
-		Type& operator=(const Type& other); // TODO
+		Type& operator=(const Type& other);
 		TypeSpecifier operator=(TypeSpecifier type);
 
 		Type();
@@ -271,7 +302,7 @@ public:
 
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
-		virtual const std::vector<ODF>& getIterationContinainer() const; // TODO
+		virtual const std::vector<ODF>& getIterationContainer() const; // TODO
 	};
 	
 	class Array : public AbstractType, AbstractArray
@@ -280,7 +311,7 @@ public:
 
 		class FixedArray : public AbstractArray
 		{
-			Type forcedType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
+			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
 			std::vector<const ODF*>* fails; // if enabled, this is not nullptr. It stores a const ptr to every ODF object that wasn't inserted into the list because of a type mismatch
 		public:
 			void push_back(const ODF& odf) override;
@@ -343,7 +374,7 @@ public:
 		size_t size() const override;
 		ODF& operator[](size_t index) override;
 		const ODF& operator[](size_t index) const override;
-		const std::vector<ODF>& getIterationContinainer() const override;
+		const std::vector<ODF>& getIterationContainer() const override;
 	};
 		
 

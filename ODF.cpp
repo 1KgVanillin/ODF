@@ -11,20 +11,25 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 	// 3. Fixtype
 	// 4. Object
 
+	// implemented priorities:
+	// type (byte)
+	// array specifier (size + fixtype)
+	// ObjectSpecifier
+
 	// save primitive type
 	mem.write<unsigned char>(type.byte()); // Prio 1
 
-	if (complexspec)
+	if (complexSpec)
 	{
-		if (auto ptr = std::get_if<ArraySpecifier>(complexspec))
+		if (auto ptr = std::get_if<FixedArraySpecifier>(complexSpec))
 		{
 			ptr->size.saveToMemory(mem); // prio 2
 
 			// save fixtype if existing
-			if (ptr->forcedType)
-				ptr->forcedType->saveToMemory(mem); // save prio 3 (resursion occurs here btw)
+			if (ptr->fixType)
+				ptr->fixType->saveToMemory(mem); // save prio 3 (resursion occurs here btw)
 		}
-		else if (auto ptr = std::get_if<ObjectSpecifier>(complexspec))
+		else if (auto ptr = std::get_if<ObjectSpecifier>(complexSpec))
 		{
 			// save object specifier
 			if (auto fixed = std::get_if<FixedObjectSpecifier>(ptr))
@@ -43,32 +48,51 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 
 ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 {
+	destroyComplexSpec(); // destroy the last complexSpec if the object was already in use
+
 	// load primitive type specifier, to allow isFixed() check
 	type = mem.read<unsigned char>(); // prio 1
+	bool obj = type.isObject();
+	bool list = type.isList();
+	bool fixed = type.isFixed();
+	bool mixed = type.isMixed();
 
-	if (auto ptr = std::get_if<ArraySpecifier>(complexspec)) // prio 2
-	{
-		ptr->size.saveToMemory(mem);
-	}
+	if (!obj || !list)
+		return;
 
-	// now load the fixtype information and allocate it
-	Type* fixtype = nullptr;
-	if (isFixed())
-	{
-		fixtype = new Type;
-		fixtype->loadFromMemory(mem); // prio 3
-	}
+	makeComplexSpec(); // make sure there's a valid complexSpec
 
-	// save object and size specifiers TODO
-	if (auto ptr = std::get_if<ObjectSpecifier>(complexspec)) // prio 4
+	// load individual complex types
+	if (list)
 	{
-		if (auto obj = std::get_if<FixedObjectSpecifier>(ptr))
+		ArraySpecifier& listSpec = complexSpec->emplace<ArraySpecifier>();
+		if (fixed)
 		{
-			obj->saveToMemory(mem);
+			FixedArraySpecifier& flistSpec = listSpec.emplace<FixedArraySpecifier>();
+			flistSpec.loadFromMemory(mem);
+			return;
 		}
-		else if (auto obj = std::get_if<MixedObjectSpecifier>(ptr))
+		else if (mixed)
 		{
-			obj->saveToMemory(mem);
+			MixedArraySpecifier& mlistSpec = listSpec.emplace<MixedArraySpecifier>();
+			mlistSpec.loadFromMemory(mem);
+			return;
+		}
+	}
+	else if (obj)
+	{
+		ObjectSpecifier& objSpec = complexSpec->emplace<ObjectSpecifier>();
+		if (fixed)
+		{
+			FixedObjectSpecifier& fobjSpec = objSpec.emplace<FixedObjectSpecifier>();
+			fobjSpec.loadFromMemory(mem); // already handles all loading
+			return;
+		}
+		else if (mixed)
+		{
+			MixedObjectSpecifier& mobjSpec = objSpec.emplace<MixedObjectSpecifier>();
+			mobjSpec.loadFromMemory(mem);
+			return;
 		}
 	}
 
@@ -164,7 +188,7 @@ std::ostream& operator<<(std::ostream& out, const ODF::Array& list)
 	if (list.isMixed())
 	{
 		size_t i = 0;
-		for (const ODF& odf : list.getIterationContinainer())
+		for (const ODF& odf : list.getIterationContainer())
 			out << i++ << ": " << odf << "\n";
 	}
 	else
@@ -241,6 +265,25 @@ inline ODF::VariantType ODF::Type::getVariantType() const
 	case TS::FXOBJ: case TS::MXOBJ: return VT_OBJ;
 	default: THROW VariantTypeConversionError();
 	}
+}
+
+void ODF::Type::destroyComplexSpec()
+{
+	if (complexSpec)
+		delete complexSpec;
+	complexSpec = nullptr;
+}
+
+void ODF::Type::makeComplexSpec()
+{
+	if (!complexSpec)
+		complexSpec = new ComplexSpecifier;
+}
+
+void ODF::Type::resetComplexSpec()
+{
+	destroyComplexSpec();
+	complexSpec = new ComplexSpecifier;
 }
 
 ODF::Type ODF::getComplexType() const
@@ -575,12 +618,12 @@ ODF::Type& ODF::Type::operator=(const Type& other)
 		return *this;
 
 	type = other.type;
-	if (complexspec) delete complexspec;
-	complexspec = nullptr;
-	if (other.complexspec)
+	if (complexSpec) delete complexSpec;
+	complexSpec = nullptr;
+	if (other.complexSpec)
 	{
-		complexspec = new std::variant<ODF::ObjectSpecifier, ODF::ArraySpecifier>;
-		*complexspec = *other.complexspec;
+		complexSpec = new std::variant<ODF::ObjectSpecifier, ODF::FixedArraySpecifier>;
+		*complexSpec = *other.complexSpec;
 	}
 
 	return *this;
@@ -594,12 +637,12 @@ ODF::TypeSpecifier ODF::Type::operator=(TypeSpecifier type)
 
 ODF::Type::Type()
 {
-	complexspec = nullptr;
+	complexSpec = nullptr;
 }
 
 ODF::Type::Type(const Type& other)
 {
-	complexspec = nullptr;
+	complexSpec = nullptr;
 	*this = other;
 }
 
@@ -648,11 +691,11 @@ void ODF::FixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 	// ...
 	// empty key = end
 
-	if (!header)
-		throw 0; // TODO
+	if (!fixType)
+		THROW 0; // TODO
 
 	// save type
-	header->saveToMemory(mem);
+	fixType->saveToMemory(mem);
 	// save keys
 	for (const std::string& key : keys)
 		mem.writeStr(key);
@@ -664,86 +707,89 @@ void ODF::FixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem)
 {
 	// prepare object for reading
 	keys.clear();
-	if (header)
-		delete header;
-	header = new Type;
+	if (fixType)
+		delete fixType;
+	fixType = new Type;
 	
 	// load header
-	header->loadFromMemory(mem);
+	fixType->loadFromMemory(mem);
 
 	// read keys until a zero terminator
 	while (mem.peek())
 		keys.push_back(mem.readStr());
 }
 
-ODF::FixedObjectSpecifier::FixedObjectSpecifier() : header(nullptr) {}
+ODF::FixedObjectSpecifier::FixedObjectSpecifier() : fixType(nullptr) {}
 
 ODF::FixedObjectSpecifier::~FixedObjectSpecifier()
 {
-	if (header)
-		delete header;
+	if (fixType)
+		delete fixType;
 }
 
 #pragma endregion
 #pragma region SizeSpecifier
 ODF::TypeSpecifier ODF::SizeSpecifier::sizeSpecifierSpecifier(TypeSpecifier original) const
 {
+	original = original & 0b00'111111ui8;
 	if (actualSize < OverflowSize8bit)
-		return 0b00'000000 | original;
+		return 0b00'000000ui8 | (unsigned char)original;
 	else if (actualSize < OverflowSize16bit)
-		return 0b01'000000 | original;
+		return 0b01'000000ui8 | (unsigned char)original;
 	else if (actualSize < OverflowSize32bit)
-		return 0b10'000000 | original;
+		return 0b10'000000ui8 | (unsigned char)original;
 	else
-		return 0b11'000000 | original;
+		return 0b11'000000ui8 | (unsigned char)original;
 }
 
-void ODF::SizeSpecifier::load(MemoryDataStream& stream, TypeSpecifier type)
+void ODF::SizeSpecifier::load(MemoryDataStream& mem, TypeSpecifier type)
 {
 	switch (type % 4)
 	{
 	case 0b00:
-		actualSize = stream.read<UINT_8>();
+		actualSize = mem.read<UINT_8>();
 		return;
 	case 0b01:
-		actualSize = stream.read<UINT_16>();
+		actualSize = mem.read<UINT_16>();
 		return;
 	case 0b10:
-		actualSize = stream.read<UINT_32>();
+		actualSize = mem.read<UINT_32>();
 		return;
 	case 0b11:
-		actualSize = stream.read<UINT_64>();
+		actualSize = mem.read<UINT_64>();
 		return;
 	}
 }
 
-void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const
+void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& mem, TypeSpecifier type) const
 {
-	switch (type % 4)
+	switch (type & 0b11'000000ui8)
 	{
-	case 0b00:
-		stream.write((const char*)&actualSize, 1);
+	case 0b00'000000:
+		mem.write((const char*)&actualSize, 1);
 		return;
-	case 0b01:
-		stream.write((const char*)&actualSize, 2);
+	case 0b01'000000:
+		mem.write((const char*)&actualSize, 2);
 		return;
-	case 0b10:
-		stream.write((const char*)&actualSize, 4);
+	case 0b10'000000:
+		mem.write((const char*)&actualSize, 4);
 		return;
-	case 0b11:
-		stream.write((const char*)&actualSize, 8);
+	case 0b11'000000:
+		mem.write((const char*)&actualSize, 8);
 		return;
 	}
 }
 
-void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& stream) const
+void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& mem) const
 {
-	saveToMemory(stream, sizeSpecifierSpecifier());
+	// modify sizeSpecSpec in type
+	mem.setPrevious(sizeSpecifierSpecifier(mem.peekPrevious()));
+	saveToMemory(mem, sizeSpecifierSpecifier());
 }
 
 void ODF::SizeSpecifier::loadFromMemory(MemoryDataStream& mem)
 {
-	THROW 6767; // 67
+	load(mem, mem.peekPrevious());
 }
 
 #pragma endregion
@@ -775,30 +821,33 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 
 void ODF::Type::setType(TypeSpecifier type)
 {
-	if (complexspec) delete complexspec;
+	if (complexSpec) delete complexSpec;
 
 	this->type = type;
 
-	complexspec = isPrimitive() ? nullptr : new std::variant<ObjectSpecifier, ArraySpecifier>;
-
-	if (needsObjectSpecifier())
-	{
-		complexspec->emplace<ObjectSpecifier>();
-		if (isFixed())
-			std::get<ObjectSpecifier>(*complexspec).emplace<FixedObjectSpecifier>();
-		else
-			std::get<ObjectSpecifier>(*complexspec).emplace<MixedObjectSpecifier>();
-	}
+	if (isPrimitive())
+		complexSpec = nullptr;
 	else
 	{
-		complexspec->emplace<ArraySpecifier>();
+		complexSpec = new std::variant<ObjectSpecifier, FixedArraySpecifier>;
+		if (needsObjectSpecifier())
+		{
+			complexSpec->emplace<ObjectSpecifier>();
+			if (isFixed())
+				std::get<ObjectSpecifier>(*complexSpec).emplace<FixedObjectSpecifier>();
+			else
+				std::get<ObjectSpecifier>(*complexSpec).emplace<MixedObjectSpecifier>();
+		}
+		else
+		{
+			complexSpec->emplace<FixedArraySpecifier>();
+		}
 	}
 }
 
 inline bool ODF::Type::isPrimitive() const
 {
-	// TODO
-	return false;
+	return !(type.isObject() || type.isList());
 }
 
 inline bool ODF::Type::needsObjectSpecifier() const
@@ -808,12 +857,13 @@ inline bool ODF::Type::needsObjectSpecifier() const
 
 inline bool ODF::Type::needsSizeSpecifier() const
 {
-	return type.isFixed();
+	// fixed list is the only type specified type currently
+	return type.withoutSSS() == TypeSpecifier::FXLIST;
 }
 
 inline bool ODF::Type::isFixed() const
 {
-	return !isMixed();
+	return type.isFixed();
 }
 
 inline bool ODF::TypeSpecifier::isMixed() const
@@ -823,7 +873,8 @@ inline bool ODF::TypeSpecifier::isMixed() const
 
 inline bool ODF::TypeSpecifier::isFixed() const
 {
-	return !isMixed();
+	// if type is list or object and FLAG_MIXED is not set
+	return (type & FLAG_OBJ || type & FLAG_LIST) && !(type & FLAG_MIXED);
 }
 
 inline bool ODF::TypeSpecifier::isObject() const
@@ -841,9 +892,24 @@ inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::smallType() const
 	return type & 0b0001'1111;
 }
 
+inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::withoutSSS() const
+{
+	return type & 0b00'111111;
+}
+
+void ODF::TypeSpecifier::saveToMemory(MemoryDataStream& mem) const
+{
+	mem.write(type);
+}
+
+void ODF::TypeSpecifier::loadFromMemory(MemoryDataStream& mem)
+{
+	*this = mem.read<Type>();
+}
+
 inline bool ODF::Type::isMixed() const
 {
-	return false;
+	return type.isMixed();
 }
 
 ODF::Status ODF::loadFromMemory(const char* data, size_t size)
@@ -1201,24 +1267,29 @@ const ODF& ODF::AbstractArray::operator[](size_t index) const
 	return list[index];
 }
 
+const std::vector<ODF>& ODF::AbstractArray::getIterationContainer() const
+{
+	return list;
+}
+
 void ODF::Array::FixedArray::push_back(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
 	Type realType = odf.getComplexType();
-	if (forcedType.type == TypeSpecifier::NULLTYPE)
-		forcedType = realType; // trigger next if statement. COmpiler will propably optimaize this out
-	if (realType == forcedType)
+	if (fixType.type == TypeSpecifier::NULLTYPE)
+		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
+	if (realType == fixType)
 		list.push_back(odf);
 	else if (fails)
 		fails->push_back(&odf);
 	else
-		throw std::bad_variant_access();
+		THROW std::bad_variant_access();
 }
 
 void ODF::Array::FixedArray::push_front(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
-	if (odf.getComplexType() == forcedType)
+	if (odf.getComplexType() == fixType)
 		list.insert(list.begin(), odf);
 	else if (fails)
 		fails->push_back(&odf);
@@ -1227,7 +1298,7 @@ void ODF::Array::FixedArray::push_front(const ODF& odf)
 void ODF::Array::FixedArray::insert(size_t where, const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
-	if (odf.getComplexType() == forcedType)
+	if (odf.getComplexType() == fixType)
 		list.insert(list.begin() + where, odf);
 	else if (fails)
 		fails->push_back(&odf);
@@ -1239,7 +1310,7 @@ void ODF::Array::FixedArray::setType(const Type& type)
 
 inline const ODF::Type& ODF::Array::FixedArray::getType() const
 {
-	return forcedType;
+	return fixType;
 }
 
 inline void ODF::Array::FixedArray::enableFailRegistry(bool enable)
@@ -1491,12 +1562,12 @@ const ODF& ODF::Array::operator[](size_t index) const
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
 }
 
-const std::vector<ODF>& ODF::Array::getIterationContinainer() const
+const std::vector<ODF>& ODF::Array::getIterationContainer() const
 {
 	if (auto ptr = std::get_if<MixedArray>(&list))
-		return ptr->getIterationContinainer();
+		return ptr->getIterationContainer();
 	else if (auto ptr = std::get_if<FixedArray>(&list))
-		return ptr->getIterationContinainer();
+		return ptr->getIterationContainer();
 	else
 		return *(std::vector<ODF>*)nullptr; // should never be reached. Fuck this.
 }
@@ -1505,6 +1576,35 @@ ODF::VariantTypeConversionError::VariantTypeConversionError(std::string message)
 {
 }
 
-void ODF::ArraySpecifier::saveToMemory(MemoryDataStream& mem) const
+void ODF::FixedArraySpecifier::saveToMemory(MemoryDataStream& mem) const
 {
+	size.saveToMemory(mem);
+}
+
+void ODF::FixedArraySpecifier::loadFromMemory(MemoryDataStream& mem)
+{
+	size.loadFromMemory(mem);
+	fixType->loadFromMemory(mem);
+}
+
+ODF::SixSeven::SixSeven(const std::string& message) : runtime_error(message) {}
+
+ODF::TypeMismatch::TypeMismatch(const std::string& message) : runtime_error(message) {}
+
+void ODF::MixedArraySpecifier::saveToMemory(MemoryDataStream& mem) const
+{
+	for (const Type& type : types)
+		type.saveToMemory(mem);
+	mem.write(0ui8); // NULLTYPE
+}
+
+void ODF::MixedArraySpecifier::loadFromMemory(MemoryDataStream& mem)
+{
+	// load types until a NULL type is found
+	while (mem.peek()) // next read type is not NULL
+	{
+		Type type;
+		type.loadFromMemory(mem);
+		types.push_back(type);
+	}
 }
