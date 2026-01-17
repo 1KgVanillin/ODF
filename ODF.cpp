@@ -18,29 +18,45 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 
 	// save primitive type
 	mem.write<unsigned char>(type.byte()); // Prio 1
+	bool obj = type.isObject();
+	bool list = type.isList();
+	bool fixed = type.isFixed();
+	bool mixed = type.isMixed();
 
-	if (complexSpec)
+	if (!obj || !list)
+		return Status::Ok;
+
+	if (list)
 	{
-		if (auto ptr = std::get_if<FixedArraySpecifier>(complexSpec))
+		ArraySpecifier& listSpec = std::get<ArraySpecifier>(*complexSpec);
+		if (fixed)
 		{
-			ptr->size.saveToMemory(mem); // prio 2
-
-			// save fixtype if existing
-			if (ptr->fixType)
-				ptr->fixType->saveToMemory(mem); // save prio 3 (resursion occurs here btw)
+			FixedArraySpecifier& flistSpec = std::get<FixedArraySpecifier>(listSpec);
+			flistSpec.saveToMemory(mem);
+			return Status::Ok;
 		}
-		else if (auto ptr = std::get_if<ObjectSpecifier>(complexSpec))
+		else if (mixed)
 		{
-			// save object specifier
-			if (auto fixed = std::get_if<FixedObjectSpecifier>(ptr))
-			{
-				fixed->saveToMemory(mem); // Size is implied by the number of keys
-			}
-			else if (auto mixed = std::get_if<MixedObjectSpecifier>(ptr))
-			{
-				mixed->saveToMemory(mem); // skip prio 2, save 3
-			}
-		}		
+			MixedArraySpecifier& mlistSpec = std::get<MixedArraySpecifier>(listSpec);
+			mlistSpec.saveToMemory(mem);
+			return Status::Ok;
+		}
+	}
+	else if (obj)
+	{
+		ObjectSpecifier& objSpec = std::get<ObjectSpecifier>(*complexSpec);
+		if (fixed)
+		{
+			FixedObjectSpecifier& fobjSpec = std::get<FixedObjectSpecifier>(objSpec);
+			fobjSpec.saveToMemory(mem);
+			return Status::Ok;
+		}
+		else if (mixed)
+		{
+			MixedObjectSpecifier& mobjSpec = std::get<MixedObjectSpecifier>(objSpec);
+			mobjSpec.saveToMemory(mem);
+			return Status::Ok;
+		}
 	}
 
 	return Status::Ok;
@@ -58,7 +74,7 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 	bool mixed = type.isMixed();
 
 	if (!obj || !list)
-		return;
+		return Status::Ok;
 
 	makeComplexSpec(); // make sure there's a valid complexSpec
 
@@ -70,13 +86,13 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 		{
 			FixedArraySpecifier& flistSpec = listSpec.emplace<FixedArraySpecifier>();
 			flistSpec.loadFromMemory(mem);
-			return;
+			return Status::Ok;
 		}
 		else if (mixed)
 		{
 			MixedArraySpecifier& mlistSpec = listSpec.emplace<MixedArraySpecifier>();
 			mlistSpec.loadFromMemory(mem);
-			return;
+			return Status::Ok;
 		}
 	}
 	else if (obj)
@@ -86,13 +102,13 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 		{
 			FixedObjectSpecifier& fobjSpec = objSpec.emplace<FixedObjectSpecifier>();
 			fobjSpec.loadFromMemory(mem); // already handles all loading
-			return;
+			return Status::Ok;
 		}
 		else if (mixed)
 		{
 			MixedObjectSpecifier& mobjSpec = objSpec.emplace<MixedObjectSpecifier>();
 			mobjSpec.loadFromMemory(mem);
-			return;
+			return Status::Ok;
 		}
 	}
 
@@ -236,7 +252,7 @@ bool operator==(const ODF& odf1, const ODF& odf2)
 
 bool ODF::Type::isString() const
 {
-	return false;
+	return type & TypeSpecifier::FLAG_STRING;
 }
 
 inline ODF::TypeSpecifier ODF::Type::getswitch() const
@@ -622,7 +638,7 @@ ODF::Type& ODF::Type::operator=(const Type& other)
 	complexSpec = nullptr;
 	if (other.complexSpec)
 	{
-		complexSpec = new std::variant<ODF::ObjectSpecifier, ODF::FixedArraySpecifier>;
+		complexSpec = new std::variant<ODF::ObjectSpecifier, ODF::ArraySpecifier>;
 		*complexSpec = *other.complexSpec;
 	}
 
@@ -829,18 +845,32 @@ void ODF::Type::setType(TypeSpecifier type)
 		complexSpec = nullptr;
 	else
 	{
-		complexSpec = new std::variant<ObjectSpecifier, FixedArraySpecifier>;
-		if (needsObjectSpecifier())
+		complexSpec = new std::variant<ObjectSpecifier, ArraySpecifier>;
+		if (isObject())
 		{
-			complexSpec->emplace<ObjectSpecifier>();
 			if (isFixed())
-				std::get<ObjectSpecifier>(*complexSpec).emplace<FixedObjectSpecifier>();
+				complexSpec->emplace<ObjectSpecifier>().emplace<FixedObjectSpecifier>();
+			else if (isMixed())
+				complexSpec->emplace<ObjectSpecifier>().emplace<MixedObjectSpecifier>();
 			else
-				std::get<ObjectSpecifier>(*complexSpec).emplace<MixedObjectSpecifier>();
+			{
+				THROW InvalidCondition();
+			}
+		}
+		else if (isList())
+		{
+			if (isFixed())
+				complexSpec->emplace<ArraySpecifier>().emplace<FixedArraySpecifier>();
+			else if (isMixed())
+				complexSpec->emplace<ArraySpecifier>().emplace<MixedArraySpecifier>();
+			else
+			{
+				THROW InvalidCondition();
+			}
 		}
 		else
 		{
-			complexSpec->emplace<FixedArraySpecifier>();
+			THROW InvalidCondition();
 		}
 	}
 }
@@ -910,6 +940,16 @@ void ODF::TypeSpecifier::loadFromMemory(MemoryDataStream& mem)
 inline bool ODF::Type::isMixed() const
 {
 	return type.isMixed();
+}
+
+inline bool ODF::Type::isObject() const
+{
+	return type.isObject();
+}
+
+inline bool ODF::Type::isList() const
+{
+	return type.isList();
 }
 
 ODF::Status ODF::loadFromMemory(const char* data, size_t size)
@@ -1608,3 +1648,5 @@ void ODF::MixedArraySpecifier::loadFromMemory(MemoryDataStream& mem)
 		types.push_back(type);
 	}
 }
+
+ODF::InvalidCondition::InvalidCondition(const std::string& message) : runtime_error(message) {}

@@ -39,7 +39,11 @@ public:
 	{
 		TypeMismatch(const std::string& message = "TypeMismatch exception");
 	};
-
+	// Throw if any condition is reached that should be unreachable in a correct implementation. Should in theory never be thrown
+	struct InvalidCondition : public std::runtime_error
+	{
+		InvalidCondition(const std::string& message = "InvalidCondition triggered");
+	};
 
 
 	// random constants
@@ -221,8 +225,10 @@ public:
 		inline bool isPrimitive() const; // True if no specifies other than TypeSpecifier are needed // TODO
 		inline bool needsObjectSpecifier() const;
 		inline bool needsSizeSpecifier() const;
-		inline bool isFixed() const; // TODO
-		inline bool isMixed() const; // TODO
+		inline bool isFixed() const;
+		inline bool isMixed() const;
+		inline bool isObject() const;
+		inline bool isList() const;
 		bool isString() const; // TODO
 		inline TypeSpecifier getswitch() const; // gets the switch() case compatible Type (without SizeSpecifier)
 		inline VariantType getVariantType() const; // TODO
