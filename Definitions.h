@@ -7,8 +7,8 @@
 #define UINT_16 unsigned short
 #define INT_32 int
 #define UINT_32 unsigned int
-#define INT_64 long
-#define UINT_64 unsigned long
+#define INT_64 long long
+#define UINT_64 unsigned long long
 #else
 #define INT_8 int8_t
 #define UINT_8 uint8_t

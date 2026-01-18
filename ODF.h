@@ -27,6 +27,12 @@ class DF_API ODF // optimized object format
 {
 public:
 	// error types
+	struct Config
+	{
+		static bool PreventAutomaticMergeLossString;
+		static bool PreventAutomaticMergeLossFloat;
+		static unsigned char DefaultIntegerMergeSize;
+	};
 	
 	// generic development exception
 	struct SixSeven : public std::runtime_error
@@ -44,6 +50,7 @@ public:
 	{
 		InvalidCondition(const std::string& message = "InvalidCondition triggered");
 	};
+	// Thrown if an initializer list contains invalid types
 
 
 	// random constants
@@ -308,13 +315,13 @@ public:
 
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
-		virtual const std::vector<ODF>& getIterationContainer() const; // TODO
+		virtual std::vector<ODF>& getIterationContainer(); // TODO
 	};
 	
 	class Array : public AbstractType, AbstractArray
 	{
 	public:
-
+		struct PreventSimilarTypeMerge { PreventSimilarTypeMerge() = default; };
 		class FixedArray : public AbstractArray
 		{
 			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
@@ -334,12 +341,18 @@ public:
 			bool fail() const;
 			const std::vector<const ODF*>& getFails(); // TODO
 
-			FixedArray();
-
 			struct InvalidTypeChange : public std::runtime_error
 			{
 				InvalidTypeChange(std::string message = "Error: ODF::Array::FixedArray::setType called on non empty array");
 			};
+
+			FixedArray();
+			template<typename T>
+			FixedArray(const std::initializer_list<T>& initializer_list) : fails(nullptr)
+			{
+				for (const T& t : initializer_list)
+					push_back(t);
+			}
 		};
 
 		// inherits all vector functions from AbstractArray
@@ -354,6 +367,9 @@ public:
 			};
 			bool canBeFixed(FixInfo* info = nullptr) const;
 			FixedArray* tryFixing(FixInfo* info = nullptr); // returned structure is on the heap and needs to be deallocated. nullptr on error
+
+			MixedArray();
+			MixedArray(const std::initializer_list<ODF>& initializer_list);
 		};
 
 		std::variant<FixedArray, MixedArray> list;
@@ -380,7 +396,20 @@ public:
 		size_t size() const override;
 		ODF& operator[](size_t index) override;
 		const ODF& operator[](size_t index) const override;
-		const std::vector<ODF>& getIterationContainer() const override;
+		std::vector<ODF>& getIterationContainer() override;
+
+		Array& operator=(const Array& other);
+		Array& operator=(const MixedArray& other);
+		Array& operator=(const std::initializer_list<ODF>& initializer_list);
+		Array& operator=(const FixedArray& other);
+		template<typename T> Array& operator=(const std::initializer_list<T>& initializer_list) { *this = FixedArray(initializer_list); }
+
+		Array();
+		Array(const Array& arr);
+		Array(const MixedArray& marr);
+		Array(const std::initializer_list<ODF>& initializer_list);
+		Array(const FixedArray& farr);
+		template<typename T> Array(const std::initializer_list<T>& initializer_list) : Array(FixedArray(initializer_list)) {}
 	};
 		
 
@@ -421,8 +450,8 @@ public:
 	static VariantType getVariantTypeFromTemplate() {}; // TODO
 
 	// Interface
-	static bool printType;
-	ODF& operator=(const ODF& other);
+	ODF& operator=(const ODF& other); // copy
+	// primitive types
 	ODF& operator=(INT_8 val);
 	ODF& operator=(UINT_8 val);
 	ODF& operator=(INT_16 val);
@@ -435,8 +464,14 @@ public:
 	ODF& operator=(double val);
 	ODF& operator=(const std::string& str);
 	ODF& operator=(const std::wstring& wstr);
-	ODF& operator=(const Object& obj);
+	// array types
 	ODF& operator=(const Array& arr);
+	ODF& operator=(const Array::MixedArray& marr);
+	ODF& operator=(const std::initializer_list<ODF>& initializer_list);
+	ODF& operator=(const Array::FixedArray& farr);
+	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = Array(initializer_list); }
+	// object types
+	ODF& operator=(const Object& obj);
 	operator INT_8();
 	operator UINT_8();
 	operator INT_16();
@@ -469,6 +504,15 @@ public:
 	ODF(const wchar_t* wstr);
 	ODF(const Object& obj);
 	ODF(const Array& arr);
+	ODF(const Array::MixedArray& marr);
+	ODF(const std::initializer_list<ODF>& initializer_list);
+	ODF(const Array::FixedArray& farr);
+	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(Array(initializer_list)) {}
+
+	// ostream printing
+	// print flags
+	bool printType;
+	// print operators
 	friend std::ostream& operator<<(std::ostream& out, const ODF& odf);
 	friend std::ostream& operator<<(std::ostream& out, const Object& obj);
 	friend std::ostream& operator<<(std::ostream& out, const Array& list);

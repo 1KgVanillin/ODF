@@ -15,8 +15,7 @@ using std::cout;
 int main()
 {
 	try {
-		ODF odf; odf = 5ui8;
-
+		ODF odf = { 5, 5 };
 		char data[100] = {};
 		memset(data, 1, 100);
 		MemoryDataStream write(data, 100);
@@ -26,7 +25,7 @@ int main()
 		ODF o2;
 		o2.loadFromMemory(data, 100);
 
-		cout << "\n\nresult: " << odf << " // " << o2 << "\n\n";
+		cout << "\n\nresult: " << odf << "---\n" << o2 << "\n\n";
 
 		return 0;
 	}

@@ -1,6 +1,8 @@
 #include "ODF.h"
 
-bool ODF::printType = true;
+bool ODF::Config::PreventAutomaticMergeLossFloat = true;
+bool ODF::Config::PreventAutomaticMergeLossString = true;
+unsigned char ODF::Config::DefaultIntegerMergeSize = 0;
 
 #pragma region specifiers
 ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
@@ -176,20 +178,20 @@ ODF::TypeSpecifier operator|(ODF::TypeSpecifier spec, unsigned char byte)
 
 std::ostream& operator<<(std::ostream& out, const ODF& odf)
 {
-	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << "[BYTE] " << (short)*ptr; }
-	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << "[UBYTE] " << (unsigned short)*ptr; }
-	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << "[SHORT] " << *ptr; }
-	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << "[USHORT] " << *ptr; }
-	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << "[INT] " << *ptr; }
-	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << "[UINT] " << *ptr; }
-	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << "[LONG] " << *ptr; }
-	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << "[ULONG] " << *ptr; }
-	if (auto ptr = std::get_if<float>(&odf.content)) { out << "[FLOAT] " << *ptr; }
-	if (auto ptr = std::get_if<double>(&odf.content)) { out << "[DOUBLE] " << *ptr; }
-	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << "[CSTR] " << *ptr; }
-	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << "[WSTR] " << ptr; }
-	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { out << "[VT_OBJ] " << *ptr; }
-	if (auto ptr = std::get_if<ODF::Array>(&odf.content)) { out << "[VT_LIST] " << *ptr; }
+	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << (odf.printType ? "[BYTE] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << (odf.printType ? "[UBYTE] " : "") << *ptr; }
+	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << (odf.printType ? "[SHORT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << (odf.printType ? "[USHORT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << (odf.printType ? "[INT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << (odf.printType ? "[UINT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << (odf.printType ? "[LONG] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << (odf.printType ? "[ULONG] " : "") << *ptr; }
+	if (auto ptr = std::get_if<float>(&odf.content)) { out << (odf.printType ? "[FLOAT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<double>(&odf.content)) { out << (odf.printType ? "[DOUBLE] " : "") << *ptr; }
+	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << (odf.printType ? "[CSTR] " : "") << *ptr; }
+	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << (odf.printType ? "[WSTR] " : "") << *ptr; }
+	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { out << (odf.printType ? "[OBJ] " : "") << *ptr; }
+	if (auto ptr = std::get_if<ODF::Array>(&odf.content)) { out << (odf.printType ? "[LIST] " : "") << *ptr; }
 	return out;
 }
 
@@ -203,13 +205,22 @@ std::ostream& operator<<(std::ostream& out, const ODF::Array& list)
 {
 	if (list.isMixed())
 	{
+		out << "<MX>\n";
 		size_t i = 0;
-		for (const ODF& odf : list.getIterationContainer())
+		for (const ODF& odf : const_cast<ODF::Array&>(list).getIterationContainer()) // bruh
 			out << i++ << ": " << odf << "\n";
 	}
 	else
 	{
-		out << list.getFixedDatatype() << "\n";
+		out << "<FX(" << list.getFixedDatatype() << ")>\n";
+		size_t i = 0;
+		for (ODF& odf : const_cast<ODF::Array&>(list).getIterationContainer()) // bruh
+		{
+			bool printType = odf.printType;
+			odf.printType = false;
+			out << i++ << ": " << odf << "\n";
+			odf.printType = printType;
+		}
 	}
 
 	return out;
@@ -440,6 +451,21 @@ ODF& ODF::operator=(const Array& arr)
 	return *this;
 }
 
+ODF& ODF::operator=(const Array::MixedArray& marr)
+{
+	return *this = Array(marr);
+}
+
+ODF& ODF::operator=(const std::initializer_list<ODF>& initializer_list)
+{
+	return *this = Array(initializer_list);
+}
+
+ODF& ODF::operator=(const Array::FixedArray& farr)
+{
+	return *this = Array(farr);
+}
+
 ODF::operator INT_8()
 {
 	return std::get<INT_8>(content);
@@ -510,7 +536,7 @@ ODF::operator Array()
 	return std::get<Array>(content);
 }
 
-ODF::ODF()
+ODF::ODF() : printType(true)
 {
 }
 
@@ -519,85 +545,91 @@ ODF::ODF(const ODF& other)
 	*this = other;
 }
 
-ODF::ODF(INT_8 val)
+ODF::ODF(INT_8 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(UINT_8 val)
+ODF::ODF(UINT_8 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(INT_16 val)
+ODF::ODF(INT_16 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(UINT_16 val)
+ODF::ODF(UINT_16 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(INT_32 val)
+ODF::ODF(INT_32 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(UINT_32 val)
+ODF::ODF(UINT_32 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(INT_64 val)
+ODF::ODF(INT_64 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(UINT_64 val)
+ODF::ODF(UINT_64 val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(float val)
+ODF::ODF(float val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(double val)
+ODF::ODF(double val) : ODF()
 {
 	*this = val;
 }
 
-ODF::ODF(const std::string& str)
+ODF::ODF(const std::string& str) : ODF()
 {
 	*this = str;
 }
 
-ODF::ODF(const char* cstr)
+ODF::ODF(const char* cstr) : ODF()
 {
 	*this = std::string(cstr);
 }
 
-ODF::ODF(const std::wstring& wstr)
+ODF::ODF(const std::wstring& wstr) : ODF()
 {
 	*this = wstr;
 }
 
-ODF::ODF(const wchar_t* wstr)
+ODF::ODF(const wchar_t* wstr) : ODF()
 {
 	*this = std::wstring(wstr);
 }
 
-ODF::ODF(const Object& obj)
+ODF::ODF(const Object& obj) : ODF()
 {
 	*this = obj;
 }
 
-ODF::ODF(const Array& arr)
+ODF::ODF(const Array& arr) : ODF()
 {
 	*this = arr;
 }
+
+ODF::ODF(const Array::MixedArray& marr) : ODF(Array(marr)) {}
+
+ODF::ODF(const Array::FixedArray& farr) : ODF(Array(farr)) {}
+
+ODF::ODF(const std::initializer_list<ODF>& initializer_list) : ODF(Array(initializer_list)) {}
 
 void ODF::makeList(bool fixed)
 {
@@ -1307,7 +1339,7 @@ const ODF& ODF::AbstractArray::operator[](size_t index) const
 	return list[index];
 }
 
-const std::vector<ODF>& ODF::AbstractArray::getIterationContainer() const
+std::vector<ODF>& ODF::AbstractArray::getIterationContainer()
 {
 	return list;
 }
@@ -1323,7 +1355,9 @@ void ODF::Array::FixedArray::push_back(const ODF& odf)
 	else if (fails)
 		fails->push_back(&odf);
 	else
+	{
 		THROW std::bad_variant_access();
+	}
 }
 
 void ODF::Array::FixedArray::push_front(const ODF& odf)
@@ -1456,6 +1490,14 @@ ODF::Array::FixedArray* ODF::Array::MixedArray::tryFixing(FixInfo* info)
 
 	result->enableFailRegistry(false);
 	return result;
+}
+
+ODF::Array::MixedArray::MixedArray()
+{
+}
+
+ODF::Array::MixedArray::MixedArray(const std::initializer_list<ODF>& initializer_list)
+{
 }
 
 ODF::Array::FixedArray::InvalidTypeChange::InvalidTypeChange(std::string message) : runtime_error(message)
@@ -1602,7 +1644,7 @@ const ODF& ODF::Array::operator[](size_t index) const
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
 }
 
-const std::vector<ODF>& ODF::Array::getIterationContainer() const
+std::vector<ODF>& ODF::Array::getIterationContainer()
 {
 	if (auto ptr = std::get_if<MixedArray>(&list))
 		return ptr->getIterationContainer();
@@ -1610,6 +1652,57 @@ const std::vector<ODF>& ODF::Array::getIterationContainer() const
 		return ptr->getIterationContainer();
 	else
 		return *(std::vector<ODF>*)nullptr; // should never be reached. Fuck this.
+}
+
+ODF::Array& ODF::Array::operator=(const Array& other)
+{
+	if (&other == this)
+		return *this;
+
+	list = other.list;
+	return *this;
+}
+
+ODF::Array& ODF::Array::operator=(const MixedArray& other)
+{
+	list = other;
+	return *this;
+}
+
+ODF::Array& ODF::Array::operator=(const std::initializer_list<ODF>& initializer_list)
+{
+	*this = MixedArray(initializer_list);
+	return *this;
+}
+
+ODF::Array& ODF::Array::operator=(const FixedArray& other)
+{
+	list = other;
+	return *this;
+}
+
+ODF::Array::Array()
+{
+}
+
+ODF::Array::Array(const Array& arr) : Array()
+{
+	*this = arr;
+}
+
+ODF::Array::Array(const MixedArray& marr) : Array()
+{
+	*this = marr;
+}
+
+ODF::Array::Array(const std::initializer_list<ODF>& initializer_list) : Array()
+{
+	*this = initializer_list;
+}
+
+ODF::Array::Array(const FixedArray& farr) : Array()
+{
+	*this = farr;
 }
 
 ODF::VariantTypeConversionError::VariantTypeConversionError(std::string message) : runtime_error(message)
