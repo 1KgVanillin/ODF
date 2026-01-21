@@ -95,6 +95,7 @@ public:
 	void writeStr(std::string str);
 	void writeWstr(std::wstring wstr);
 
+	void skip(size_t numBytes = 1); // skip numBytes bytes
 	char peek();
 	void peek(char* destination, size_t size);
 	char read();

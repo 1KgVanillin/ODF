@@ -50,7 +50,11 @@ public:
 	{
 		InvalidCondition(const std::string& message = "InvalidCondition triggered");
 	};
-	// Thrown if an initializer list contains invalid types
+	// Throw if a specifier contains a wrong number of elements or properties for loading a type
+	struct SpecifierMismatch : public std::runtime_error
+	{
+		SpecifierMismatch(const std::string& message = "SpecifierMismatch exception");
+	};
 
 
 	// random constants
@@ -73,24 +77,26 @@ public:
 		operator bool();
 		bool operator!();
 		bool operator!=(Status other);
+		bool operator!=(Value other);
 		bool operator==(Status other);
+		bool operator==(Value other);
 		Status operator=(Status other);
 		Status(Value val = Status::Ok);
 	};
 
-	class AbstractSpecifier
+	class AbstractDataObject
 	{
 	public:
 		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
 		virtual void loadFromMemory(MemoryDataStream& mem) = 0;
 	};
 
-	class TypeSpecifier : public AbstractSpecifier // The size specifier specifier is removed automatically when impicitely used.
+	class TypeSpecifier : public AbstractDataObject // The size specifier specifier is removed automatically when impicitely used.
 	{
 	public:
 		typedef unsigned char Type;
 		Type type;
-		inline Type byte() const; // returns just the raw byte.
+		inline unsigned char byte() const; // returns just the raw byte.
 		inline Type sizeSpec() const;
 		inline bool isSigned() const;
 		inline bool isUnsigned() const;
@@ -147,7 +153,7 @@ public:
 		static constexpr Type MXLIST = FLAG_LIST | FLAG_MIXED;
 	};
 
-	struct SizeSpecifier : public AbstractSpecifier
+	struct SizeSpecifier : public AbstractDataObject
 	{
 		static constexpr size_t OverflowSize8bit = 256;
 		static constexpr size_t OverflowSize16bit = 65'536;
@@ -155,49 +161,21 @@ public:
 		// no OverflowSize64bit, as it would be zero on a 64bit system
 		size_t actualSize;
 
+		size_t operator=(size_t size);
+
 		TypeSpecifier sizeSpecifierSpecifier(TypeSpecifier original = 0) const; // wow. Use like type = spec.sizeSpecSpec(type). Selects the sizeSpecifierSpecifier as the smallest value possible that still fits
 		void load(MemoryDataStream& stream, TypeSpecifier type);
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
 		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
 		void loadFromMemory(MemoryDataStream& mem) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
+		SizeSpecifier() = default;
 	};
 
-	struct MixedObjectSpecifier : public AbstractSpecifier
-	{
-		typedef const std::pair<std::string, Type>& ObjectIterator;
-		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
-	};
-
-	struct FixedObjectSpecifier : public AbstractSpecifier
-	{
-		Type* fixType;
-		std::vector<std::string> keys;
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
-
-		FixedObjectSpecifier();
-		~FixedObjectSpecifier();
-	};
-
-	// The ArraySpecifier holds all type information that is needed to load or save an array.
-	// saves or loads the size specifier on save
-	struct FixedArraySpecifier : public AbstractSpecifier
-	{
-		SizeSpecifier size;
-		Type* fixType; // nullptr if mixed, forcedType if fixed
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
-	};
-
-	struct MixedArraySpecifier : public AbstractSpecifier
-	{
-		std::vector<Type> types;
-
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
-	};
+	// forward declarations
+	struct FixedArraySpecifier;
+	struct MixedArraySpecifier;
+	struct FixedObjectSpecifier;
+	struct MixedObjectSpecifier;
 
 	// variant type definitions
 	typedef size_t VariantType;
@@ -239,10 +217,24 @@ public:
 		bool isString() const; // TODO
 		inline TypeSpecifier getswitch() const; // gets the switch() case compatible Type (without SizeSpecifier)
 		inline VariantType getVariantType() const; // TODO
+		SizeSpecifier* sizeSpecifier() const; // returns nullptr if there is no sizespecifier
+		ArraySpecifier* arraySpecifier() const;
+		FixedArraySpecifier* fixedArraySpecifier() const;
+		MixedArraySpecifier* mixedArraySpecifier() const;
+		ObjectSpecifier* objectSpecifier() const;
+		FixedObjectSpecifier* fixedObjectSpecifier() const;
+		MixedObjectSpecifier* mixedObjectSpecifier() const;
 
+		const Type* getFixType() const; // returns the fixtype if the current type is complex and fixed. otherwise returns nullptr
+		const std::vector<Type>* getArrayTypes() const; // returns the types vector of the mixed array specifier if mixed, otherwise nullptr
+		const std::map<std::string, Type>* getObjectTypes() const; // returns the types vector of the mixed object specifier if mixed, otherwise nullptr
+		void setSSS(unsigned char sss);
 		void destroyComplexSpec();
 		void makeComplexSpec(); // memory leak safe. Makes sure complexSpec is valid, keeps the old one if one is already existing
 		void resetComplexSpec(); // memory leak safe. If an old complexSpec exists it gets destroyed, then a fresh one is allcated. Maybe fix performace of this by keeping and overwriting the old object? TODO
+
+		friend bool operator==(const Type& t1, const Type& t2);
+		friend bool operator!=(const Type& t1, const Type& t2);
 
 		operator unsigned char();
 		Type& operator=(const Type& other);
@@ -250,7 +242,42 @@ public:
 
 		Type();
 		Type(const Type& other);
+		Type(TypeSpecifier type);
 		~Type();
+	};
+
+	// The ArraySpecifier holds all type information that is needed to load or save an array.
+	// saves or loads the size specifier on save
+	struct FixedArraySpecifier : public AbstractDataObject
+	{
+		SizeSpecifier size;
+		Type fixType; // always holds a value, is just a pointer because of the forward declaring
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
+	};
+
+	struct MixedArraySpecifier : public AbstractDataObject
+	{
+		std::vector<Type> types;
+
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
+	};
+
+	struct FixedObjectSpecifier : public AbstractDataObject
+	{
+		Type fixType;
+		std::vector<std::string> keys;
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
+	};
+
+	struct MixedObjectSpecifier : public AbstractDataObject
+	{
+		typedef const std::pair<std::string, Type>& ObjectIterator;
+		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
 	enum class TypeClass
@@ -299,7 +326,7 @@ public:
 	// The AbstractArray is an implementation of the mixed array.
 	// The mixedArray inherits everything from it.
 	// The FixedArray inherits erase, etc. and overwrites the push and insert functions to make a fixed check
-	class AbstractArray
+	class AbstractArray : public AbstractDataObject
 	{
 	protected:
 		std::vector<ODF> list;
@@ -316,6 +343,12 @@ public:
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
 		virtual std::vector<ODF>& getIterationContainer(); // TODO
+
+		virtual ODF* begin() const noexcept;
+		virtual ODF* end() const noexcept;
+
+		virtual void clear();
+		virtual void resize(size_t newSize);
 	};
 	
 	class Array : public AbstractType, AbstractArray
@@ -330,16 +363,21 @@ public:
 			void push_back(const ODF& odf) override;
 			void push_front(const ODF& odf) override;
 			void insert(size_t where, const ODF& odf) override;
+			void updateSize(Type& size) const;
 
 			template<typename T>
 			void convert(std::function<T(const ODF& odf)> converter); // TODO
 
 			void setType(const Type& type); // can only be called on an empty list, otherwise throws exception // TODO
+			void resize(size_t newSize) override;
 			const Type& getType() const; // TODO
 
 			void enableFailRegistry(bool enable = true); // TODO
 			bool fail() const;
 			const std::vector<const ODF*>& getFails(); // TODO
+
+			void saveToMemory(MemoryDataStream& mem) const override;
+			void loadFromMemory(MemoryDataStream& mem) override;
 
 			struct InvalidTypeChange : public std::runtime_error
 			{
@@ -351,6 +389,12 @@ public:
 			FixedArray(const std::initializer_list<T>& initializer_list) : fails(nullptr)
 			{
 				for (const T& t : initializer_list)
+					push_back(t);
+			}
+			template<typename T>
+			FixedArray(const std::vector<T>& vector) : fails(nullptr)
+			{
+				for (const T& t : vector)
 					push_back(t);
 			}
 		};
@@ -368,6 +412,9 @@ public:
 			bool canBeFixed(FixInfo* info = nullptr) const;
 			FixedArray* tryFixing(FixInfo* info = nullptr); // returned structure is on the heap and needs to be deallocated. nullptr on error
 
+			void saveToMemory(MemoryDataStream& mem) const override;
+			void loadFromMemory(MemoryDataStream& mem) override;
+
 			MixedArray();
 			MixedArray(const std::initializer_list<ODF>& initializer_list);
 		};
@@ -382,7 +429,7 @@ public:
 		bool canBeFixed() const override; // TODO
 		bool tryFixing() const override; // TODO
 		bool isMixed() const override; // TODO
-		Type getFixedDatatype() const override; // TODO, called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
+		Type getFixedDatatype() const override; // called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
 		Type getTargetDatatype() const override; // TODO, called on mixed list, returns the datatype that every element would have if converted to fixed. THrows std::bad_variant_access if called on fixed
 
 		// List functions
@@ -398,6 +445,16 @@ public:
 		const ODF& operator[](size_t index) const override;
 		std::vector<ODF>& getIterationContainer() override;
 
+		FixedArray& fixed() const; // just forwards to get<FixedArray>()
+		MixedArray& mixed() const; // just forwards to get<MixedArray>()
+
+		void resetAndSetSize(size_t newSize, const std::vector<Type>& newTypes); // this function is called by the root object which loads the specifier to tell the array their size. All current data is lost.
+		void resetAndSetSize(size_t newSize, const Type& newType); // this function is called by the root object which loads the specifier to tell the array their size. All current data is lost. Works only on fixed arrays
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem) override;
+
+		friend bool operator==(const Array& arr1, const Array& arr2);
+		friend bool operator!=(const Array& arr1, const Array& arr2);
 		Array& operator=(const Array& other);
 		Array& operator=(const MixedArray& other);
 		Array& operator=(const std::initializer_list<ODF>& initializer_list);
@@ -410,6 +467,7 @@ public:
 		Array(const std::initializer_list<ODF>& initializer_list);
 		Array(const FixedArray& farr);
 		template<typename T> Array(const std::initializer_list<T>& initializer_list) : Array(FixedArray(initializer_list)) {}
+		template<typename T> Array(const std::vector<T>& vector) : Array(FixedArray(vector)) {}
 	};
 		
 
@@ -450,6 +508,10 @@ public:
 	static VariantType getVariantTypeFromTemplate() {}; // TODO
 
 	// Interface
+	// access operators
+	ODF& operator[](size_t index);
+
+	// operator=
 	ODF& operator=(const ODF& other); // copy
 	// primitive types
 	ODF& operator=(INT_8 val);
@@ -469,7 +531,7 @@ public:
 	ODF& operator=(const Array::MixedArray& marr);
 	ODF& operator=(const std::initializer_list<ODF>& initializer_list);
 	ODF& operator=(const Array::FixedArray& farr);
-	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = Array(initializer_list); }
+	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = Array::FixedArray(initializer_list); }
 	// object types
 	ODF& operator=(const Object& obj);
 	operator INT_8();
@@ -507,7 +569,8 @@ public:
 	ODF(const Array::MixedArray& marr);
 	ODF(const std::initializer_list<ODF>& initializer_list);
 	ODF(const Array::FixedArray& farr);
-	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(Array(initializer_list)) {}
+	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(Array::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
+	template<typename T> ODF(const std::vector<T>& vector) : ODF(Array::FixedArray(vector)) {}
 
 	// ostream printing
 	// print flags
@@ -520,8 +583,9 @@ public:
 	friend std::ostream& operator<<(std::ostream& out, const Type& type);
 
 	// list functions
-	void makeList(bool fixed); // clears content and converts element to a list
+	void makeList(); // clears content and converts element to a list
 	void makeList(const Type& elementType); // clears content and converts to fxlist of with elementtype
+	void makeList(const TypeSpecifier& elementType); // clears content and converts to fxlist of with elementtype
 	void push_back(const ODF& odf);
 	void push_front(const ODF& odf);
 	void erase(size_t index);
@@ -536,6 +600,7 @@ public:
 	bool erase_range_nothrow(size_t from, size_t to) noexcept;
 	bool insert_nothrow(size_t where, const ODF& odf) noexcept;
 	size_t find_nothrow(const ODF& odf) noexcept;
+	size_t size() const;
 
 	// Operators
 	friend bool operator== (const ODF& odf1, const ODF& odf2); // TODO
@@ -553,6 +618,8 @@ public:
 	Status loadFromStream(std::istream& in, bool binary = true);
 
 private:
+	void updateSize(); // will dereferece a nullptr if the type doesn't has a sizeSpecfier or throw an std::bad_variant_access
+
 	Status saveBody(MemoryDataStream& mem) const;
 	Status saveObject(MemoryDataStream& mem) const;
 	Status saveArray(MemoryDataStream& mem) const;
