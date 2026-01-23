@@ -171,6 +171,15 @@ public:
 		SizeSpecifier() = default;
 	};
 
+	enum class TypeClass
+	{
+		Int,
+		Float,
+		String,
+		List,
+		Object
+	};
+
 	// forward declarations
 	struct FixedArraySpecifier;
 	struct MixedArraySpecifier;
@@ -226,6 +235,7 @@ public:
 		MixedObjectSpecifier* mixedObjectSpecifier() const;
 
 		const Type* getFixType() const; // returns the fixtype if the current type is complex and fixed. otherwise returns nullptr
+		TypeClass getTypeClass() const;
 		const std::vector<Type>* getArrayTypes() const; // returns the types vector of the mixed array specifier if mixed, otherwise nullptr
 		const std::map<std::string, Type>* getObjectTypes() const; // returns the types vector of the mixed object specifier if mixed, otherwise nullptr
 		void setSSS(unsigned char sss);
@@ -278,13 +288,6 @@ public:
 		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
 		void saveToMemory(MemoryDataStream& mem) const override;
 		void loadFromMemory(MemoryDataStream& mem) override;
-	};
-
-	enum class TypeClass
-	{
-		Int,
-		Float,
-		Other
 	};
 
 	// Data Types
@@ -351,7 +354,7 @@ public:
 		virtual void resize(size_t newSize);
 	};
 	
-	class Array : public AbstractType, AbstractArray
+	class List : public AbstractType, AbstractArray
 	{
 	public:
 		struct PreventSimilarTypeMerge { PreventSimilarTypeMerge() = default; };
@@ -453,21 +456,21 @@ public:
 		void saveToMemory(MemoryDataStream& mem) const override;
 		void loadFromMemory(MemoryDataStream& mem) override;
 
-		friend bool operator==(const Array& arr1, const Array& arr2);
-		friend bool operator!=(const Array& arr1, const Array& arr2);
-		Array& operator=(const Array& other);
-		Array& operator=(const MixedArray& other);
-		Array& operator=(const std::initializer_list<ODF>& initializer_list);
-		Array& operator=(const FixedArray& other);
-		template<typename T> Array& operator=(const std::initializer_list<T>& initializer_list) { *this = FixedArray(initializer_list); }
+		friend bool operator==(const List& arr1, const List& arr2);
+		friend bool operator!=(const List& arr1, const List& arr2);
+		List& operator=(const List& other);
+		List& operator=(const MixedArray& other);
+		List& operator=(const std::initializer_list<ODF>& initializer_list);
+		List& operator=(const FixedArray& other);
+		template<typename T> List& operator=(const std::initializer_list<T>& initializer_list) { *this = FixedArray(initializer_list); }
 
-		Array();
-		Array(const Array& arr);
-		Array(const MixedArray& marr);
-		Array(const std::initializer_list<ODF>& initializer_list);
-		Array(const FixedArray& farr);
-		template<typename T> Array(const std::initializer_list<T>& initializer_list) : Array(FixedArray(initializer_list)) {}
-		template<typename T> Array(const std::vector<T>& vector) : Array(FixedArray(vector)) {}
+		List();
+		List(const List& arr);
+		List(const MixedArray& marr);
+		List(const std::initializer_list<ODF>& initializer_list);
+		List(const FixedArray& farr);
+		template<typename T> List(const std::initializer_list<T>& initializer_list) : List(FixedArray(initializer_list)) {}
+		template<typename T> List(const std::vector<T>& vector) : List(FixedArray(vector)) {}
 	};
 		
 
@@ -486,7 +489,7 @@ public:
 		std::string, // 10
 		std::wstring, // 11
 		Object, // 12
-		Array // 13
+		List // 13
 	> ValueType;
 	ValueType content;
 
@@ -527,11 +530,11 @@ public:
 	ODF& operator=(const std::string& str);
 	ODF& operator=(const std::wstring& wstr);
 	// array types
-	ODF& operator=(const Array& arr);
-	ODF& operator=(const Array::MixedArray& marr);
+	ODF& operator=(const List& arr);
+	ODF& operator=(const List::MixedArray& marr);
 	ODF& operator=(const std::initializer_list<ODF>& initializer_list);
-	ODF& operator=(const Array::FixedArray& farr);
-	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = Array::FixedArray(initializer_list); }
+	ODF& operator=(const List::FixedArray& farr);
+	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = List::FixedArray(initializer_list); }
 	// object types
 	ODF& operator=(const Object& obj);
 	operator INT_8();
@@ -547,7 +550,7 @@ public:
 	operator std::string();
 	operator std::wstring();
 	operator Object();
-	operator Array();
+	operator List();
 	ODF();
 	ODF(const ODF& other);
 	ODF(INT_8 val);
@@ -565,12 +568,12 @@ public:
 	ODF(const std::wstring& wstr);
 	ODF(const wchar_t* wstr);
 	ODF(const Object& obj);
-	ODF(const Array& arr);
-	ODF(const Array::MixedArray& marr);
+	ODF(const List& arr);
+	ODF(const List::MixedArray& marr);
 	ODF(const std::initializer_list<ODF>& initializer_list);
-	ODF(const Array::FixedArray& farr);
-	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(Array::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
-	template<typename T> ODF(const std::vector<T>& vector) : ODF(Array::FixedArray(vector)) {}
+	ODF(const List::FixedArray& farr);
+	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(List::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
+	template<typename T> ODF(const std::vector<T>& vector) : ODF(List::FixedArray(vector)) {}
 
 	// ostream printing
 	// print flags
@@ -578,9 +581,12 @@ public:
 	// print operators
 	friend std::ostream& operator<<(std::ostream& out, const ODF& odf);
 	friend std::ostream& operator<<(std::ostream& out, const Object& obj);
-	friend std::ostream& operator<<(std::ostream& out, const Array& list);
+	friend std::ostream& operator<<(std::ostream& out, const List& list);
 	friend std::ostream& operator<<(std::ostream& out, const std::wstring& wstr);
 	friend std::ostream& operator<<(std::ostream& out, const Type& type);
+
+	// generic functions
+	bool isConvertableTo(const Type& other) const;
 
 	// list functions
 	void makeList(); // clears content and converts element to a list
@@ -633,6 +639,6 @@ private:
 #include "ODF.tpp"
 
 template<typename T>
-inline void ODF::Array::FixedArray::convert(std::function<T(const ODF& odf)> converter)
+inline void ODF::List::FixedArray::convert(std::function<T(const ODF& odf)> converter)
 {
 }

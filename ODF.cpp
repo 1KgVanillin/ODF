@@ -222,7 +222,7 @@ bool operator!=(const ODF::Type& t1, const ODF::Type& t2)
 	return !operator==(t1, t2);
 }
 
-bool operator==(const ODF::Array& arr1, const ODF::Array& arr2)
+bool operator==(const ODF::List& arr1, const ODF::List& arr2)
 {
 	if (arr1.size() != arr2.size())
 		return false;
@@ -236,7 +236,7 @@ bool operator==(const ODF::Array& arr1, const ODF::Array& arr2)
 	return true;
 }
 
-bool operator!=(const ODF::Array& arr1, const ODF::Array& arr2)
+bool operator!=(const ODF::List& arr1, const ODF::List& arr2)
 {
 	return !operator==(arr1, arr2);
 }
@@ -256,7 +256,7 @@ std::ostream& operator<<(std::ostream& out, const ODF& odf)
 	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << (odf.printType ? "[CSTR] " : "") << *ptr; }
 	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << (odf.printType ? "[WSTR] " : "") << *ptr; }
 	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { out << (odf.printType ? "[OBJ] " : "") << *ptr; }
-	if (auto ptr = std::get_if<ODF::Array>(&odf.content)) { out << (odf.printType ? "[LIST] " : "") << *ptr; }
+	if (auto ptr = std::get_if<ODF::List>(&odf.content)) { out << (odf.printType ? "[LIST] " : "") << *ptr; }
 	return out;
 }
 
@@ -266,20 +266,20 @@ std::ostream& operator<<(std::ostream& out, const ODF::Object& obj)
 	return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const ODF::Array& list)
+std::ostream& operator<<(std::ostream& out, const ODF::List& list)
 {
 	if (list.isMixed())
 	{
 		out << "<MX>\n";
 		size_t i = 0;
-		for (const ODF& odf : const_cast<ODF::Array&>(list).getIterationContainer()) // bruh
+		for (const ODF& odf : const_cast<ODF::List&>(list).getIterationContainer()) // bruh
 			out << i++ << ": " << odf << "\n";
 	}
 	else
 	{
 		out << "<FX(" << list.getFixedDatatype() << ")>\n";
 		size_t i = 0;
-		for (ODF& odf : const_cast<ODF::Array&>(list).getIterationContainer()) // bruh
+		for (ODF& odf : const_cast<ODF::List&>(list).getIterationContainer()) // bruh
 		{
 			bool printType = odf.printType;
 			odf.printType = false;
@@ -340,7 +340,7 @@ bool operator==(const ODF& odf1, const ODF& odf2)
 	case ODF::VT_DOUBLE: return std::get<double>(odf1.content) == std::get<double>(odf2.content);
 	case ODF::VT_CSTR: return std::get<std::string>(odf1.content) == std::get<std::string>(odf2.content);
 	case ODF::VT_WSTR: return std::get<std::wstring>(odf1.content) == std::get<std::wstring>(odf2.content);
-	case ODF::VT_LIST: return std::get<ODF::Array>(odf1.content) == std::get<ODF::Array>(odf2.content);
+	case ODF::VT_LIST: return std::get<ODF::List>(odf1.content) == std::get<ODF::List>(odf2.content);
 	case ODF::VT_OBJ: return std::get<ODF::Object>(odf1.content) == std::get<ODF::Object>(odf2.content);
 	}
 }
@@ -457,6 +457,37 @@ const ODF::Type* ODF::Type::getFixType() const
 		return &std::get<FixedObjectSpecifier>(std::get<ObjectSpecifier>(*complexSpec)).fixType;
 }
 
+ODF::TypeClass ODF::Type::getTypeClass() const
+{
+	using TS = TypeSpecifier;
+	switch (type.withoutSSS())
+	{
+	case TS::BYTE:
+	case TS::UBYTE:
+	case TS::SHORT:
+	case TS::USHORT:
+	case TS::INT:
+	case TS::UINT:
+	case TS::LONG:
+	case TS::ULONG:
+		return TypeClass::Int;
+	case TS::FLOAT:
+	case TS::DOUBLE:
+		return TypeClass::Float;
+	case TS::CSTR:
+	case TS::WSTR:
+		return TypeClass::String;
+	case TS::FXLIST:
+	case TS::MXLIST:
+		return TypeClass::List;
+	case TS::FXOBJ:
+	case TS::MXOBJ:
+		return TypeClass::Object;
+	default:
+		THROW InvalidCondition();
+	}
+}
+
 const std::vector<ODF::Type>* ODF::Type::getArrayTypes() const
 {
 	if (!isMixed() || !isList())
@@ -532,7 +563,7 @@ ODF ODF::getAs(TypeSpecifier spec) const
 
 ODF& ODF::operator[](size_t size)
 {
-	return std::get<Array>(content)[size];
+	return std::get<List>(content)[size];
 }
 
 ODF& ODF::operator=(const ODF& other)
@@ -636,33 +667,33 @@ ODF& ODF::operator=(const Object& obj)
 	return *this;
 }
 
-ODF& ODF::operator=(const Array& arr)
+ODF& ODF::operator=(const List& arr)
 {
 	type = arr.isMixed() ? TypeSpecifier::MXLIST : TypeSpecifier::FXLIST;
 	content = arr;
 	return *this;
 }
 
-ODF& ODF::operator=(const Array::MixedArray& marr)
+ODF& ODF::operator=(const List::MixedArray& marr)
 {
 	type = TypeSpecifier::MXLIST;
 	MixedArraySpecifier& marrSpec = std::get<MixedArraySpecifier>(std::get<ArraySpecifier>(*type.complexSpec));
-	for (const ODF& odf : const_cast<Array::MixedArray&>(marr).getIterationContainer())
+	for (const ODF& odf : const_cast<List::MixedArray&>(marr).getIterationContainer())
 		marrSpec.types.push_back(odf.type);
-	content.emplace<Array>() = marr;
+	content.emplace<List>() = marr;
 	return *this;
 }
 
 ODF& ODF::operator=(const std::initializer_list<ODF>& initializer_list)
 {
-	return *this = Array::MixedArray(initializer_list);
+	return *this = List::MixedArray(initializer_list);
 }
 
-ODF& ODF::operator=(const Array::FixedArray& farr)
+ODF& ODF::operator=(const List::FixedArray& farr)
 {
 	type = TypeSpecifier::FXLIST;
 	std::get<FixedArraySpecifier>(std::get<ArraySpecifier>(*type.complexSpec)).fixType = farr.getType();
-	Array dbg(farr);
+	List dbg(farr);
 	content = dbg;
 	updateSize();
 	return *this;
@@ -733,9 +764,9 @@ ODF::operator Object()
 	return std::get<Object>(content);
 }
 
-ODF::operator Array()
+ODF::operator List()
 {
-	return std::get<Array>(content);
+	return std::get<List>(content);
 }
 
 ODF::ODF() : printType(true)
@@ -822,35 +853,228 @@ ODF::ODF(const Object& obj) : ODF()
 	*this = obj;
 }
 
-ODF::ODF(const Array& arr) : ODF()
+ODF::ODF(const List& arr) : ODF()
 {
 	*this = arr;
 }
 
-ODF::ODF(const Array::MixedArray& marr) : ODF()
+ODF::ODF(const List::MixedArray& marr) : ODF()
 {
 	*this = marr;
 }
 
-ODF::ODF(const Array::FixedArray& farr) : ODF()
+ODF::ODF(const List::FixedArray& farr) : ODF()
 {
 	*this = farr;
 }
 
-ODF::ODF(const std::initializer_list<ODF>& initializer_list) : ODF(Array::MixedArray(initializer_list)) {}
+ODF::ODF(const std::initializer_list<ODF>& initializer_list) : ODF(List::MixedArray(initializer_list)) {}
+
+bool ODF::isConvertableTo(const Type& other) const
+{
+	using TS = TypeSpecifier;
+	switch (type.getswitch())
+	{
+	case TS::BYTE:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<INT_8>(content) == (UINT_8)std::get<INT_8>(content);
+		case TS::BYTE:
+		case TS::SHORT:
+		case TS::USHORT:
+		case TS::INT:
+		case TS::UINT:
+		case TS::LONG:
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::UBYTE:
+		switch (other.getswitch())
+		{
+		case TS::BYTE:
+			return std::get<UINT_8>(content) == (UINT_8)std::get<UINT_8>(content);
+		case TS::UBYTE:
+		case TS::SHORT:
+		case TS::USHORT:
+		case TS::INT:
+		case TS::UINT:
+		case TS::LONG:
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::SHORT:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<INT_16>(content) == (UINT_8)std::get<INT_16>(content);
+		case TS::BYTE:
+			return std::get<INT_16>(content) == (INT_8)std::get<INT_16>(content);
+		case TS::USHORT:
+			return std::get<INT_16>(content) == (UINT_16)std::get<INT_16>(content);
+		case TS::SHORT:
+		case TS::INT:
+		case TS::UINT:
+		case TS::LONG:
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::USHORT:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<UINT_16>(content) == (UINT_8)std::get<UINT_16>(content);
+		case TS::BYTE:
+			return std::get<UINT_16>(content) == (INT_8)std::get<UINT_16>(content);
+		case TS::SHORT:
+			return std::get<UINT_16>(content) == (INT_16)std::get<UINT_16>(content);
+		case TS::USHORT:
+		case TS::INT:
+		case TS::UINT:
+		case TS::LONG:
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::INT:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<INT_32>(content) == (UINT_8)std::get<INT_32>(content);
+		case TS::BYTE:
+			return std::get<INT_32>(content) == (INT_8)std::get<INT_32>(content);
+		case TS::USHORT:
+			return std::get<INT_32>(content) == (UINT_16)std::get<INT_32>(content);
+		case TS::SHORT:
+			return std::get<INT_32>(content) == (INT_16)std::get<INT_32>(content);
+		case TS::UINT:
+			return std::get<INT_32>(content) == (UINT_32)std::get<INT_32>(content);
+		case TS::INT:
+		case TS::LONG:
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::UINT:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<UINT_32>(content) == (UINT_8)std::get<UINT_32>(content);
+		case TS::BYTE:
+			return std::get<UINT_32>(content) == (INT_8)std::get<UINT_32>(content);
+		case TS::USHORT:
+			return std::get<UINT_32>(content) == (UINT_16)std::get<UINT_32>(content);
+		case TS::SHORT:
+			return std::get<UINT_32>(content) == (INT_16)std::get<UINT_32>(content);
+		case TS::INT:
+			return std::get<UINT_32>(content) == (INT_32)std::get<UINT_32>(content);
+		case TS::UINT:
+		case TS::LONG:
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::LONG:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<INT_64>(content) == (UINT_8)std::get<INT_64>(content);
+		case TS::BYTE:
+			return std::get<INT_64>(content) == (INT_8)std::get<INT_64>(content);
+		case TS::USHORT:
+			return std::get<INT_64>(content) == (UINT_16)std::get<INT_64>(content);
+		case TS::SHORT:
+			return std::get<INT_64>(content) == (INT_16)std::get<INT_64>(content);
+		case TS::INT:
+			return std::get<INT_64>(content) == (INT_32)std::get<INT_64>(content);
+		case TS::UINT:
+			return std::get<INT_64>(content) == (UINT_32)std::get<INT_64>(content);
+		case TS::ULONG:
+			return std::get<INT_64>(content) == (UINT_64)std::get<INT_64>(content);
+		case TS::LONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::ULONG:
+		switch (other.getswitch())
+		{
+		case TS::UBYTE:
+			return std::get<UINT_64>(content) == (UINT_8)std::get<UINT_64>(content);
+		case TS::BYTE:
+			return std::get<UINT_64>(content) == (INT_8)std::get<UINT_64>(content);
+		case TS::USHORT:
+			return std::get<UINT_64>(content) == (UINT_16)std::get<UINT_64>(content);
+		case TS::SHORT:
+			return std::get<UINT_64>(content) == (INT_16)std::get<UINT_64>(content);
+		case TS::INT:
+			return std::get<UINT_64>(content) == (INT_32)std::get<UINT_64>(content);
+		case TS::UINT:
+			return std::get<UINT_64>(content) == (UINT_32)std::get<UINT_64>(content);
+		case TS::LONG:
+			return std::get<UINT_64>(content) == (INT_64)std::get<UINT_64>(content);
+		case TS::ULONG:
+			return true;
+		default:
+			return false;
+		}
+	case TS::FLOAT:
+		switch (other.getswitch())
+		{
+		case TS::FLOAT:
+		case TS::DOUBLE:
+			return true;
+		default:
+			return false;
+		}
+	case TS::DOUBLE:
+		switch (other.getswitch())
+		{
+		case TS::DOUBLE:
+			return true;
+		default:
+			return false;
+		}
+	case TS::CSTR:
+		switch (other.getswitch())
+		{
+		case TS::CSTR:
+			return true;
+		default:
+			return false;
+		}
+	case TS::WSTR:
+		switch (other.getswitch())
+		{
+		case TS::WSTR:
+			return true;
+		default:
+			return false;
+		}
+	}
+}
 
 void ODF::makeList()
 {
-	content.emplace<Array>();
-	Array& list = std::get<Array>(content);
+	content.emplace<List>();
+	List& list = std::get<List>(content);
 	type = TypeSpecifier::MXLIST;
 	list.clearAndMix();
 }
 
 void ODF::makeList(const Type& elementType)
 {
-	content.emplace<Array>();
-	Array& list = std::get<Array>(content);
+	content.emplace<List>();
+	List& list = std::get<List>(content);
 	type = TypeSpecifier::FXLIST;
 	list.clearAndFix(elementType);
 }
@@ -1215,7 +1439,7 @@ ODF::Status ODF::loadFromStream(std::istream& in, bool binary)
 
 void ODF::updateSize()
 {
-	std::get<Array::FixedArray>((std::get<Array>(content).list)).updateSize(type); // Oha
+	std::get<List::FixedArray>((std::get<List>(content).list)).updateSize(type); // Oha
 }
 
 ODF::Status ODF::saveBody(MemoryDataStream& mem) const
@@ -1279,7 +1503,7 @@ ODF::Status ODF::saveObject(MemoryDataStream& mem) const
 
 ODF::Status ODF::saveArray(MemoryDataStream& mem) const
 {
-	std::get<Array>(content).saveToMemory(mem);		
+	std::get<List>(content).saveToMemory(mem);		
 	return Status::Ok;
 }
 
@@ -1340,7 +1564,7 @@ ODF::Status ODF::loadObject(MemoryDataStream& mem)
 
 ODF::Status ODF::loadArray(MemoryDataStream& mem)
 {
-	Array& arr = content.emplace<Array>();
+	List& arr = content.emplace<List>();
 	if (type.isFixed())
 	{
 		arr.resetAndSetSize(type.sizeSpecifier()->actualSize, *type.getFixType()); // tell the array its size, derefereces a nullptr if the type is not an array.
@@ -1403,49 +1627,49 @@ void ODF::AbstractArray::push_back(const ODF& odf)
 
 void ODF::push_back(const ODF& odf)
 {
-	std::get<Array>(content).push_back(odf);
+	std::get<List>(content).push_back(odf);
 	if (type.isFixed())
 		updateSize();
 }
 
 void ODF::push_front(const ODF& odf)
 {
-	std::get<Array>(content).push_front(odf);
+	std::get<List>(content).push_front(odf);
 	if (type.isFixed())
 		updateSize();
 }
 
 void ODF::erase(size_t index)
 {
-	std::get<Array>(content).erase(index);
+	std::get<List>(content).erase(index);
 	if (type.isFixed())
 		updateSize();
 }
 
 void ODF::erase(size_t index, size_t numberOfElements)
 {
-	std::get<Array>(content).erase(index, numberOfElements);
+	std::get<List>(content).erase(index, numberOfElements);
 	if (type.isFixed())
 		updateSize();
 }
 
 void ODF::erase_range(size_t from, size_t to)
 {
-	std::get<Array>(content).erase_range(from, to);
+	std::get<List>(content).erase_range(from, to);
 	if (type.isFixed())
 		updateSize();
 }
 
 void ODF::insert(size_t where, const ODF& odf)
 {
-	std::get<Array>(content).insert(where, odf);
+	std::get<List>(content).insert(where, odf);
 	if (type.isFixed())
 		updateSize();
 }
 
 size_t ODF::find(const ODF& odf)
 {
-	return std::get<Array>(content).find(odf);
+	return std::get<List>(content).find(odf);
 }
 
 bool ODF::push_back_nothrow(const ODF& odf) noexcept
@@ -1533,7 +1757,7 @@ size_t ODF::find_nothrow(const ODF& odf) noexcept
 
 size_t ODF::size() const
 {
-	return std::get<Array>(content).size();
+	return std::get<List>(content).size();
 }
 
 void ODF::AbstractArray::push_front(const ODF& odf)
@@ -1610,7 +1834,7 @@ void ODF::AbstractArray::resize(size_t newSize)
 	list.resize(newSize);
 }
 
-void ODF::Array::FixedArray::push_back(const ODF& odf)
+void ODF::List::FixedArray::push_back(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
 	Type realType = odf.getComplexType();
@@ -1626,7 +1850,7 @@ void ODF::Array::FixedArray::push_back(const ODF& odf)
 	}
 }
 
-void ODF::Array::FixedArray::push_front(const ODF& odf)
+void ODF::List::FixedArray::push_front(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
 	if (odf.getComplexType() == fixType)
@@ -1635,7 +1859,7 @@ void ODF::Array::FixedArray::push_front(const ODF& odf)
 		fails->push_back(&odf);
 }
 
-void ODF::Array::FixedArray::insert(size_t where, const ODF& odf)
+void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
 	if (odf.getComplexType() == fixType)
@@ -1644,53 +1868,53 @@ void ODF::Array::FixedArray::insert(size_t where, const ODF& odf)
 		fails->push_back(&odf);
 }
 
-void ODF::Array::FixedArray::updateSize(Type& type) const
+void ODF::List::FixedArray::updateSize(Type& type) const
 {
 	*type.sizeSpecifier() = list.size();
 	type.setSSS(type.sizeSpecifier()->sizeSpecifierSpecifier());
 }
 
-void ODF::Array::FixedArray::setType(const Type& type)
+void ODF::List::FixedArray::setType(const Type& type)
 {
 	fixType = type;
 }
 
-void ODF::Array::FixedArray::resize(size_t newSize)
+void ODF::List::FixedArray::resize(size_t newSize)
 {
 	list.resize(newSize);
 	for (ODF& odf : list)
 		odf.type = fixType;
 }
 
-inline const ODF::Type& ODF::Array::FixedArray::getType() const
+inline const ODF::Type& ODF::List::FixedArray::getType() const
 {
 	return fixType;
 }
 
-inline void ODF::Array::FixedArray::enableFailRegistry(bool enable)
+inline void ODF::List::FixedArray::enableFailRegistry(bool enable)
 {
 }
 
-bool ODF::Array::FixedArray::fail() const
+bool ODF::List::FixedArray::fail() const
 {
 	return false; // TODO
 }
 
-inline const std::vector<const ODF*>& ODF::Array::FixedArray::getFails()
+inline const std::vector<const ODF*>& ODF::List::FixedArray::getFails()
 {
 	// TODO: hier return-Anweisung eingeben
 	std::vector<const ODF*> TODO;
 	return TODO;
 }
 
-void ODF::Array::FixedArray::saveToMemory(MemoryDataStream& mem) const
+void ODF::List::FixedArray::saveToMemory(MemoryDataStream& mem) const
 {
 	// only the body is saved
 	for (const ODF& odf : list)
 		odf.saveBody(mem);
 }
 
-void ODF::Array::FixedArray::loadFromMemory(MemoryDataStream& mem)
+void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem)
 {
 	// only the body is loaded. Size is already filled into list by external code (loading of specifiers in root object)
 	for (ODF& odf : list)
@@ -1700,11 +1924,11 @@ void ODF::Array::FixedArray::loadFromMemory(MemoryDataStream& mem)
 	}
 }
 
-ODF::Array::FixedArray::FixedArray() : fails(nullptr)
+ODF::List::FixedArray::FixedArray() : fails(nullptr)
 {
 }
 
-bool ODF::Array::MixedArray::canBeFixed(FixInfo* info) const
+bool ODF::List::MixedArray::canBeFixed(FixInfo* info) const
 {
 	// check for same type, as this is the default case where the caller already constructed a valid Fixed List inside a Mixed List
 	if (!list.size()) // empty lists cannot be fixed, as no Type is provided.
@@ -1746,7 +1970,7 @@ bool ODF::Array::MixedArray::canBeFixed(FixInfo* info) const
 	return true;
 }
 
-ODF::Array::FixedArray* ODF::Array::MixedArray::tryFixing(FixInfo* info)
+ODF::List::FixedArray* ODF::List::MixedArray::tryFixing(FixInfo* info)
 {
 	if (!info)
 	{
@@ -1789,31 +2013,31 @@ ODF::Array::FixedArray* ODF::Array::MixedArray::tryFixing(FixInfo* info)
 	return result;
 }
 
-void ODF::Array::MixedArray::saveToMemory(MemoryDataStream& mem) const
+void ODF::List::MixedArray::saveToMemory(MemoryDataStream& mem) const
 {
 	// save only the body
 	for (const ODF odf : list)
 		odf.saveBody(mem);
 }
 
-void ODF::Array::MixedArray::loadFromMemory(MemoryDataStream& mem)
+void ODF::List::MixedArray::loadFromMemory(MemoryDataStream& mem)
 {
 	// load only the body. The size is already set by the specifier loading of the root object
 	for (ODF& odf : list)
 		odf.loadBody(mem);
 }
 
-ODF::Array::MixedArray::MixedArray()
+ODF::List::MixedArray::MixedArray()
 {
 }
 
-ODF::Array::MixedArray::MixedArray(const std::initializer_list<ODF>& initializer_list)
+ODF::List::MixedArray::MixedArray(const std::initializer_list<ODF>& initializer_list)
 {
 	for (const ODF& odf : initializer_list)
 		list.push_back(odf);
 }
 
-ODF::Array::FixedArray::InvalidTypeChange::InvalidTypeChange(std::string message) : runtime_error(message)
+ODF::List::FixedArray::InvalidTypeChange::InvalidTypeChange(std::string message) : runtime_error(message)
 {
 }
 
@@ -1846,118 +2070,119 @@ ODF::Type ODF::Object::getTargetDatatype() const
 	return Type();
 }
 
-void ODF::Array::clearAndFix()
+void ODF::List::clearAndFix()
 {
 	list.emplace<FixedArray>();
 }
 
-void ODF::Array::clearAndFix(const Type& elementType)
+void ODF::List::clearAndFix(const Type& elementType)
 {
 	list.emplace<FixedArray>();
 	std::get<FixedArray>(list).setType(elementType);
 }
 
-void ODF::Array::clearAndMix()
+void ODF::List::clearAndMix()
 {
 	list.emplace<MixedArray>();
 }
 
-void ODF::Array::makeMixed() const
+void ODF::List::makeMixed() const
 {
 }
 
-bool ODF::Array::canBeFixed() const
-{
-	return false;
-}
-
-bool ODF::Array::tryFixing() const
+bool ODF::List::canBeFixed() const
 {
 	return false;
 }
 
-bool ODF::Array::isMixed() const
+bool ODF::List::tryFixing() const
+{
+	return false;
+}
+
+bool ODF::List::isMixed() const
 {
 	return list.index();
 }
 
-ODF::Type ODF::Array::getFixedDatatype() const
+ODF::Type ODF::List::getFixedDatatype() const
 {
 	return std::get<FixedArray>(list).getType();
 }
 
-ODF::Type ODF::Array::getTargetDatatype() const
+ODF::Type ODF::List::getTargetDatatype() const
 {
 	return Type();
 }
 
-void ODF::Array::push_back(const ODF& odf)
+void ODF::List::push_back(const ODF& odf)
 {
 	std::visit([&odf](ODF::AbstractArray& base) {
 		base.push_back(odf);
 		}, list);
+	if (auto ptr = std::get_if<ODF::Array::>)
 }
 
-void ODF::Array::push_front(const ODF& odf)
+void ODF::List::push_front(const ODF& odf)
 {
 	std::visit([&odf](ODF::AbstractArray& base) {
 		base.push_front(odf);
 		}, list);
 }
 
-void ODF::Array::erase(size_t index)
+void ODF::List::erase(size_t index)
 {
 	std::visit([&index](ODF::AbstractArray& base) {
 		base.erase(index);
 		}, list);
 }
 
-void ODF::Array::erase(size_t index, size_t numberOfElements)
+void ODF::List::erase(size_t index, size_t numberOfElements)
 {
 	std::visit([&](ODF::AbstractArray& base) {
 		base.erase(index, numberOfElements);
 		}, list);
 }
 
-void ODF::Array::erase_range(size_t from, size_t to)
+void ODF::List::erase_range(size_t from, size_t to)
 {
 	std::visit([&](ODF::AbstractArray& base) {
 		base.erase_range(from, to);
 		}, list);
 }
 
-void ODF::Array::insert(size_t where, const ODF& odf)
+void ODF::List::insert(size_t where, const ODF& odf)
 {
 	std::visit([&](ODF::AbstractArray& base) {
 		base.insert(where, odf);
 		}, list);
 }
 
-size_t ODF::Array::find(const ODF& odf)
+size_t ODF::List::find(const ODF& odf)
 {
 	return std::visit([&odf](ODF::AbstractArray& base) -> size_t {
 		return base.find(odf);
 		}, list);
 }
 
-size_t ODF::Array::size() const
+size_t ODF::List::size() const
 {
 	return std::visit([](const ODF::AbstractArray& base) {
 		return base.size();
 		}, list);
 }
 
-ODF& ODF::Array::operator[](size_t index)
+ODF& ODF::List::operator[](size_t index)
 {
 	return std::visit([&](AbstractArray& base) -> ODF& { return base[index]; }, list);
 }
 
-const ODF& ODF::Array::operator[](size_t index) const
+const ODF& ODF::List::operator[](size_t index) const
 {
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
 }
 
-std::vector<ODF>& ODF::Array::getIterationContainer()
+std::vector<ODF>& ODF::List::getIterationContainer()
 {
 	if (auto ptr = std::get_if<MixedArray>(&list))
 		return ptr->getIterationContainer();
@@ -1967,17 +2192,17 @@ std::vector<ODF>& ODF::Array::getIterationContainer()
 		return *(std::vector<ODF>*)nullptr; // should never be reached. Fuck this.
 }
 
-ODF::Array::FixedArray& ODF::Array::fixed() const
+ODF::List::FixedArray& ODF::List::fixed() const
 {
 	return const_cast<FixedArray&>(std::get<FixedArray>(list));
 }
 
-ODF::Array::MixedArray& ODF::Array::mixed() const
+ODF::List::MixedArray& ODF::List::mixed() const
 {
 	return const_cast<MixedArray&>(std::get<MixedArray>(list));
 }
 
-void ODF::Array::resetAndSetSize(size_t newSize, const std::vector<Type>& newTypes)
+void ODF::List::resetAndSetSize(size_t newSize, const std::vector<Type>& newTypes)
 {
 	MixedArray& marr = list.emplace<MixedArray>();
 	marr.clear();
@@ -1990,7 +2215,7 @@ void ODF::Array::resetAndSetSize(size_t newSize, const std::vector<Type>& newTyp
 		marr[i].type = newTypes[i];
 }
 
-void ODF::Array::resetAndSetSize(size_t newSize, const Type& newType)
+void ODF::List::resetAndSetSize(size_t newSize, const Type& newType)
 {
 	FixedArray& farr = list.emplace<FixedArray>();
 	farr.clear();
@@ -1998,7 +2223,7 @@ void ODF::Array::resetAndSetSize(size_t newSize, const Type& newType)
 	farr.resize(newSize);
 }
 
-void ODF::Array::saveToMemory(MemoryDataStream& mem) const
+void ODF::List::saveToMemory(MemoryDataStream& mem) const
 {
 	if (isMixed())
 		std::get<MixedArray>(list).saveToMemory(mem);
@@ -2006,7 +2231,7 @@ void ODF::Array::saveToMemory(MemoryDataStream& mem) const
 		std::get<FixedArray>(list).saveToMemory(mem);
 }
 
-void ODF::Array::loadFromMemory(MemoryDataStream& mem)
+void ODF::List::loadFromMemory(MemoryDataStream& mem)
 {
 	if (isMixed())
 		const_cast<MixedArray&>(std::get<MixedArray>(list)).loadFromMemory(mem);
@@ -2014,7 +2239,7 @@ void ODF::Array::loadFromMemory(MemoryDataStream& mem)
 		const_cast<FixedArray&>(std::get<FixedArray>(list)).loadFromMemory(mem);
 }
 
-ODF::Array& ODF::Array::operator=(const Array& other)
+ODF::List& ODF::List::operator=(const List& other)
 {
 	if (&other == this)
 		return *this;
@@ -2023,44 +2248,44 @@ ODF::Array& ODF::Array::operator=(const Array& other)
 	return *this;
 }
 
-ODF::Array& ODF::Array::operator=(const MixedArray& other)
+ODF::List& ODF::List::operator=(const MixedArray& other)
 {
 	list = other;
 	return *this;
 }
 
-ODF::Array& ODF::Array::operator=(const std::initializer_list<ODF>& initializer_list)
+ODF::List& ODF::List::operator=(const std::initializer_list<ODF>& initializer_list)
 {
 	*this = MixedArray(initializer_list);
 	return *this;
 }
 
-ODF::Array& ODF::Array::operator=(const FixedArray& other)
+ODF::List& ODF::List::operator=(const FixedArray& other)
 {
 	list = other;
 	return *this;
 }
 
-ODF::Array::Array()
+ODF::List::List()
 {
 }
 
-ODF::Array::Array(const Array& arr) : Array()
+ODF::List::List(const List& arr) : List()
 {
 	*this = arr;
 }
 
-ODF::Array::Array(const MixedArray& marr) : Array()
+ODF::List::List(const MixedArray& marr) : List()
 {
 	*this = marr;
 }
 
-ODF::Array::Array(const std::initializer_list<ODF>& initializer_list) : Array()
+ODF::List::List(const std::initializer_list<ODF>& initializer_list) : List()
 {
 	*this = initializer_list;
 }
 
-ODF::Array::Array(const FixedArray& farr) : Array()
+ODF::List::List(const FixedArray& farr) : List()
 {
 	*this = farr;
 }

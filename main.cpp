@@ -50,7 +50,7 @@ int main()
 
 		odf.makeList(ODF::Type(ODF::TypeSpecifier::UINT));
 
-		odf.push_back(5);
+		odf.push_back(5ui32);
 
 		cout << "start:\n" << odf << "\n";
 
