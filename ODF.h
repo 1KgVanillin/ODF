@@ -13,14 +13,7 @@
 #include <iostream>
 #include <algorithm>
 #include <functional>
-
-
-/*	Inheritance structure:
-*	
-*	
-* 
-* 
-*/
+#include <optional>
 
 
 class DF_API ODF // optimized object format
@@ -54,6 +47,15 @@ public:
 	struct SpecifierMismatch : public std::runtime_error
 	{
 		SpecifierMismatch(const std::string& message = "SpecifierMismatch exception");
+	};
+	// Thrown if a function is called that is not valid for the current type, (for example calling push_back on an integer or setFixType on a mixed List)
+	struct InvalidType : public std::runtime_error
+	{
+		InvalidType(const std::string& message = "InvalidType exception");
+	};
+	struct InvalidConversion : public std::runtime_error
+	{
+		InvalidConversion(const std::string& message = "InvalidConversion exception");
 	};
 
 
@@ -116,6 +118,10 @@ public:
 		friend TypeSpecifier operator>>(TypeSpecifier spec, unsigned char shiftBy);
 		friend TypeSpecifier operator&(TypeSpecifier spec, unsigned char byte);
 		friend TypeSpecifier operator|(TypeSpecifier spec, unsigned char byte);
+		friend bool operator==(TypeSpecifier spec1, TypeSpecifier spec2);
+		friend bool operator!=(TypeSpecifier spec1, TypeSpecifier spec2);
+		friend bool operator==(TypeSpecifier spec, TypeSpecifier::Type type);
+		friend bool operator!=(TypeSpecifier spec, TypeSpecifier::Type type);
 
 		TypeSpecifier(Type t = 0);
 
@@ -234,6 +240,7 @@ public:
 		FixedObjectSpecifier* fixedObjectSpecifier() const;
 		MixedObjectSpecifier* mixedObjectSpecifier() const;
 
+		void setFixType(const Type& type);
 		const Type* getFixType() const; // returns the fixtype if the current type is complex and fixed. otherwise returns nullptr
 		TypeClass getTypeClass() const;
 		const std::vector<Type>* getArrayTypes() const; // returns the types vector of the mixed array specifier if mixed, otherwise nullptr
@@ -302,17 +309,53 @@ public:
 		virtual Type getTargetDatatype() const = 0;
 	};
 
-	class Object : public AbstractType
+	class AbstractObject : public AbstractDataObject
+	{
+		protected:
+		std::map<std::string, ODF> map;
+	public:
+		typedef std::pair<std::string, ODF> Pair;
+		typedef std::map<std::string, ODF>::const_iterator ConstIterator;
+		virtual void insert(std::string& key, const ODF& odf);
+		virtual void insert(const Pair& value);
+		virtual void insert(const std::map<std::string, ODF>& map);
+		virtual void insert(const std::unordered_map<std::string, ODF>& umap);
+		virtual void insert(const std::vector<Pair>& pairs);
+		virtual void insert(const std::initializer_list<Pair>& pairs);
+		virtual void erase(const std::string& key);
+		virtual bool contains(const std::string& key) const;
+		virtual size_t count(const std::string& key) const;
+		virtual size_t size() const;
+
+		virtual ODF& at(const std::string& key);
+		virtual const ODF& at(const std::string& key) const;
+		virtual ODF& operator[](const std::string& key);
+
+		virtual ConstIterator begin() const noexcept;
+		virtual ConstIterator end() const noexcept;
+		virtual std::map<std::string, ODF>& getObjectContainer();
+	};
+
+	class Object : public AbstractType, public AbstractObject
 	{
 	public:
-		class MixedObject
+		class FixedObject : public AbstractObject
 		{
 		public:
+			void saveToMemory(MemoryDataStream& mem) const override;
+			void loadFromMemory(MemoryDataStream& mem) override;
+
+			FixedObject();
 		};
 
-		class FixedObject
+		class MixedObject : public AbstractObject
 		{
 		public:
+			void saveToMemory(MemoryDataStream& mem) const override;
+			void loadFromMemory(MemoryDataStream& mem) override;
+
+			MixedObject();
+			MixedObject(const std::initializer_list<Pair>& elements);
 		};
 		
 		std::variant<FixedObject, MixedObject> object;
@@ -342,19 +385,18 @@ public:
 		virtual void insert(size_t where, const ODF& odf);
 		virtual size_t find(const ODF& odf);
 		virtual size_t size() const;
+		virtual void clear();
+		virtual void resize(size_t newSize);
 
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
-		virtual std::vector<ODF>& getIterationContainer(); // TODO
 
 		virtual ODF* begin() const noexcept;
 		virtual ODF* end() const noexcept;
-
-		virtual void clear();
-		virtual void resize(size_t newSize);
+		virtual std::vector<ODF>& getArrayContainer();
 	};
 	
-	class List : public AbstractType, AbstractArray
+	class List : public AbstractType, public AbstractArray
 	{
 	public:
 		struct PreventSimilarTypeMerge { PreventSimilarTypeMerge() = default; };
@@ -425,6 +467,7 @@ public:
 		std::variant<FixedArray, MixedArray> list;
 
 		// type functions
+		void clear();
 		void clearAndFix(); // clear and make fixed
 		void clearAndFix(const Type& elementType); // clear and make fixed
 		void clearAndMix(); // clear and make mixed
@@ -446,7 +489,9 @@ public:
 		size_t size() const override;
 		ODF& operator[](size_t index) override;
 		const ODF& operator[](size_t index) const override;
-		std::vector<ODF>& getIterationContainer() override;
+		std::vector<ODF>& getArrayContainer() override;
+
+		void insert(std::string key, ODF& odf) override;
 
 		FixedArray& fixed() const; // just forwards to get<FixedArray>()
 		MixedArray& mixed() const; // just forwards to get<MixedArray>()
@@ -503,9 +548,6 @@ public:
 	TypeClass getTypeClass() const; // TODO
 	unsigned char getPrecision() const; // TODO
 	static TypeSpecifier getTypeFromTC(TypeClass tc, unsigned char precision); // TODO
-
-	// Conversion Interface
-	ODF getAs(TypeSpecifier spec) const; // only for primitive types // TODO
 
 	template<typename T>
 	static VariantType getVariantTypeFromTemplate() {}; // TODO
@@ -587,6 +629,20 @@ public:
 
 	// generic functions
 	bool isConvertableTo(const Type& other) const;
+	void convertTo(const Type& newType);
+	bool covertToIfConvertable(const Type& newType);
+	ODF getAs(const Type& newType) const;
+	std::optional<ODF> getAsIfConvertable(const Type& newType) const;
+	template<typename T>
+	T& get()
+	{
+		return std::get<T>(content);
+	}
+	template<typename T>
+	const T& get() const
+	{
+		return std::get<T>(content);
+	}
 
 	// list functions
 	void makeList(); // clears content and converts element to a list
@@ -607,6 +663,7 @@ public:
 	bool insert_nothrow(size_t where, const ODF& odf) noexcept;
 	size_t find_nothrow(const ODF& odf) noexcept;
 	size_t size() const;
+	void clear();
 
 	// Operators
 	friend bool operator== (const ODF& odf1, const ODF& odf2); // TODO

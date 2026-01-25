@@ -3,17 +3,6 @@
 #include "ODF.h"
 using std::cout;
 
-/*
-* TODO:
-* Fix this project.
-* Learn Qt
-* Become a sigma
-* 
-* Other stuff:
-* make sure the list type inside a OBJLIST
-* is equal, if some members are lists.
-*/
-
 double random()
 {
 	static std::mt19937 gen(std::random_device{}());
@@ -35,6 +24,11 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 		t = functor();
 }
 
+// TODO
+// implement conversion mechanics for complex types
+// implement objects
+// implement for fixing mechanics
+
 int main()
 {
 	// goals:
@@ -46,9 +40,14 @@ int main()
 	
 	try {
 		ODF odf;
-		odf.makeList();
 
 		odf.makeList(ODF::Type(ODF::TypeSpecifier::UINT));
+
+		odf.push_back(5ui32);
+		odf.push_back(6ui32);
+		odf.push_back(7);
+
+		odf.clear();
 
 		odf.push_back(5ui32);
 

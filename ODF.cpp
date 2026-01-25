@@ -176,6 +176,26 @@ ODF::TypeSpecifier operator|(ODF::TypeSpecifier spec, unsigned char byte)
 	return spec.type | byte;
 }
 
+bool operator==(ODF::TypeSpecifier spec1, ODF::TypeSpecifier spec2)
+{
+	return spec1.byte() == spec2.byte();
+}
+
+bool operator!=(ODF::TypeSpecifier spec1, ODF::TypeSpecifier spec2)
+{
+	return spec1.byte() != spec2.byte();
+}
+
+bool operator==(ODF::TypeSpecifier spec, ODF::TypeSpecifier::Type type)
+{
+	return spec.byte() == type;
+}
+
+bool operator!=(ODF::TypeSpecifier spec, ODF::TypeSpecifier::Type type)
+{
+	return spec.byte() != type;
+}
+
 bool operator==(const ODF::Type& t1, const ODF::Type& t2)
 {
 	if (t1.type != t2.type) // check if primitive types match
@@ -272,14 +292,14 @@ std::ostream& operator<<(std::ostream& out, const ODF::List& list)
 	{
 		out << "<MX>\n";
 		size_t i = 0;
-		for (const ODF& odf : const_cast<ODF::List&>(list).getIterationContainer()) // bruh
+		for (const ODF& odf : const_cast<ODF::List&>(list).getArrayContainer()) // bruh
 			out << i++ << ": " << odf << "\n";
 	}
 	else
 	{
 		out << "<FX(" << list.getFixedDatatype() << ")>\n";
 		size_t i = 0;
-		for (ODF& odf : const_cast<ODF::List&>(list).getIterationContainer()) // bruh
+		for (ODF& odf : const_cast<ODF::List&>(list).getArrayContainer()) // bruh
 		{
 			bool printType = odf.printType;
 			odf.printType = false;
@@ -446,6 +466,19 @@ ODF::MixedObjectSpecifier* ODF::Type::mixedObjectSpecifier() const
 	return nullptr;
 }
 
+void ODF::Type::setFixType(const Type& type)
+{
+	if (isPrimitive() || isMixed())
+	{
+		THROW InvalidType();
+	}
+
+	if (isList())
+		std::get<FixedArraySpecifier>(std::get<ArraySpecifier>(*complexSpec)).fixType = type;
+	else
+		std::get<FixedObjectSpecifier>(std::get<ObjectSpecifier>(*complexSpec)).fixType = type;
+}
+
 const ODF::Type* ODF::Type::getFixType() const
 {
 	if (isPrimitive() || isMixed())
@@ -554,11 +587,6 @@ unsigned char ODF::getPrecision() const
 ODF::TypeSpecifier ODF::getTypeFromTC(TypeClass tc, unsigned char precision)
 {
 	return TypeSpecifier();
-}
-
-ODF ODF::getAs(TypeSpecifier spec) const
-{
-	return ODF();
 }
 
 ODF& ODF::operator[](size_t size)
@@ -678,7 +706,7 @@ ODF& ODF::operator=(const List::MixedArray& marr)
 {
 	type = TypeSpecifier::MXLIST;
 	MixedArraySpecifier& marrSpec = std::get<MixedArraySpecifier>(std::get<ArraySpecifier>(*type.complexSpec));
-	for (const ODF& odf : const_cast<List::MixedArray&>(marr).getIterationContainer())
+	for (const ODF& odf : const_cast<List::MixedArray&>(marr).getArrayContainer())
 		marrSpec.types.push_back(odf.type);
 	content.emplace<List>() = marr;
 	return *this;
@@ -1063,6 +1091,367 @@ bool ODF::isConvertableTo(const Type& other) const
 	}
 }
 
+void ODF::convertTo(const Type& newType)
+{
+	using TS = TypeSpecifier;
+	try {
+		switch (type.getswitch())
+		{
+		case TS::BYTE:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<INT_8>()); // format: content.emplace<INNER>(get<OUTER>());
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<INT_8>());
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<INT_8>());
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<INT_8>());
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<INT_8>());
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<INT_8>());
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<INT_8>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::UBYTE:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<UINT_8>());
+				return;
+			case TS::UBYTE:
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<UINT_8>());
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<UINT_8>());
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<UINT_8>());
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<UINT_8>());
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<UINT_8>());
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<UINT_8>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::SHORT:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<INT_16>());
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<INT_16>());
+				return;
+			case TS::SHORT:
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<INT_16>());
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<INT_16>());
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<INT_16>());
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<INT_16>());
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<INT_16>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::USHORT:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<UINT_16>());
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<UINT_16>());
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<UINT_16>());
+				return;
+			case TS::USHORT:
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<UINT_16>());
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<UINT_16>());
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<UINT_16>());
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<UINT_16>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::INT:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<INT_32>());
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<INT_32>());
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<INT_32>());
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<INT_32>());
+				return;
+			case TS::INT:
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<INT_32>());
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<INT_32>());
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<INT_32>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::UINT:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<UINT_32>());
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<UINT_32>());
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<UINT_32>());
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<UINT_32>());
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<UINT_32>());
+				return;
+			case TS::UINT:
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<UINT_32>());
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<UINT_32>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::LONG:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<INT_64>());
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<INT_64>());
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<INT_64>());
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<INT_64>());
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<INT_64>());
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<INT_64>());
+				return;
+			case TS::LONG:
+				return;
+			case TS::ULONG:
+				type = TS::ULONG;
+				content.emplace<UINT_64>(get<INT_64>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::ULONG:
+			switch (newType.getswitch())
+			{
+			case TS::BYTE:
+				type = TS::BYTE;
+				content.emplace<INT_8>(get<UINT_64>());
+				return;
+			case TS::UBYTE:
+				type = TS::UBYTE;
+				content.emplace<UINT_8>(get<UINT_64>());
+				return;
+			case TS::SHORT:
+				type = TS::SHORT;
+				content.emplace<INT_16>(get<UINT_64>());
+				return;
+			case TS::USHORT:
+				type = TS::USHORT;
+				content.emplace<UINT_16>(get<UINT_64>());
+				return;
+			case TS::INT:
+				type = TS::INT;
+				content.emplace<INT_32>(get<UINT_64>());
+				return;
+			case TS::UINT:
+				type = TS::UINT;
+				content.emplace<UINT_32>(get<UINT_64>());
+				return;
+			case TS::LONG:
+				type = TS::LONG;
+				content.emplace<INT_64>(get<UINT_64>());
+				return;
+			case TS::ULONG:
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::FLOAT:
+			switch (newType.getswitch())
+			{
+			case TS::FLOAT:
+				return;
+			case TS::DOUBLE:
+				type = TS::DOUBLE;
+				content.emplace<double>(get<float>());
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+		case TS::DOUBLE:
+			switch (newType.getswitch())
+			{
+			case TS::DOUBLE:
+				return;
+			default:
+				THROW InvalidConversion();
+			}
+			
+		case TS::FXLIST: // TODO
+		case TS::MXLIST: // TODO
+		case TS::FXOBJ: // TODO
+		case TS::MXOBJ: // TODO
+
+		case TS::CSTR:
+		case TS::WSTR:
+			THROW InvalidConversion();
+		}
+	}
+	catch (...)
+	{
+		THROW InvalidConversion();
+	}
+}
+
+bool ODF::covertToIfConvertable(const Type& newType)
+{
+	if (isConvertableTo(newType))
+	{
+		convertTo(newType);
+		return true;
+	}
+	else
+		return false;
+}
+
+ODF ODF::getAs(const Type& newType) const
+{
+	ODF copy = *this;
+	copy.convertTo(newType);
+	return copy;
+}
+
+std::optional<ODF> ODF::getAsIfConvertable(const Type& newType) const
+{
+	if (isConvertableTo(newType))
+	{
+		ODF copy = *this;
+		copy.convertTo(newType);
+		return copy;
+	}
+	else
+		return std::nullopt;
+}
+
 void ODF::makeList()
 {
 	content.emplace<List>();
@@ -1076,6 +1465,7 @@ void ODF::makeList(const Type& elementType)
 	content.emplace<List>();
 	List& list = std::get<List>(content);
 	type = TypeSpecifier::FXLIST;
+	type.setFixType(elementType);
 	list.clearAndFix(elementType);
 }
 
@@ -1760,6 +2150,11 @@ size_t ODF::size() const
 	return std::get<List>(content).size();
 }
 
+void ODF::clear()
+{
+	std::get<List>(content).clear();
+}
+
 void ODF::AbstractArray::push_front(const ODF& odf)
 {
 	list.insert(list.begin(), odf);
@@ -1809,7 +2204,7 @@ const ODF& ODF::AbstractArray::operator[](size_t index) const
 	return list[index];
 }
 
-std::vector<ODF>& ODF::AbstractArray::getIterationContainer()
+std::vector<ODF>& ODF::AbstractArray::getArrayContainer()
 {
 	return list;
 }
@@ -1838,7 +2233,7 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
 	Type realType = odf.getComplexType();
-	if (fixType.type == TypeSpecifier::NULLTYPE)
+	if (fixType.type == TypeSpecifier::NULLTYPE) // if fixtype is NULL it will be set correctly
 		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
 	if (realType == fixType)
 		list.push_back(odf);
@@ -1846,7 +2241,14 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 		fails->push_back(&odf);
 	else
 	{
-		THROW std::bad_variant_access();
+		// try converting the element to the desired type
+		if (odf.isConvertableTo(fixType))
+			push_back(odf.getAs(fixType));
+		else
+		{
+			// thrown an exception if it is not convertable
+			THROW std::bad_variant_access();
+		}
 	}
 }
 
@@ -1953,7 +2355,7 @@ bool ODF::List::MixedArray::canBeFixed(FixInfo* info) const
 
 	// check for an integer or float type match
 	TypeClass tc = list[0].getTypeClass();
-	if (tc == TypeClass::Other)
+	if (tc == TypeClass::Int) // ?? DOes not work btw (was previously tc == TypeClass::Other)
 		return false;
 
 	// check whole list and get max precision
@@ -1968,49 +2370,6 @@ bool ODF::List::MixedArray::canBeFixed(FixInfo* info) const
 		info->tc = tc;
 	}
 	return true;
-}
-
-ODF::List::FixedArray* ODF::List::MixedArray::tryFixing(FixInfo* info)
-{
-	if (!info)
-	{
-		if (!canBeFixed(info))
-			return nullptr;
-	}
-
-	// convert to mixed
-	FixedArray* result = new FixedArray;
-
-	if (info->tcmatch)
-	{ // match only be type class
-		unsigned char maxPrecision = 0;
-		for (const ODF& odf : list)
-			if (unsigned char precision = odf.getPrecision() > maxPrecision)
-				maxPrecision = precision;
-
-		// convert everything to the new precision
-		info->targetType.type = getTypeFromTC(info->tc, maxPrecision);
-		result->setType(info->targetType);
-
-		// tagettype is primitive becauuse of tcmatch
-		for (const ODF& odf : list)
-			result->push_back(odf.getAs(info->targetType.type));
-		return result;
-	}
-
-	result->enableFailRegistry();
-	result->setType(info->targetType);
-	for (const ODF& odf : list)
-		result->push_back(odf);
-	if (result->fail())
-	{
-		std::cout << "ODF error: conversion to fixed failed: " << result->getFails().size() << " Subconversions failed.\n";
-		delete result;
-		return nullptr;
-	}
-
-	result->enableFailRegistry(false);
-	return result;
 }
 
 void ODF::List::MixedArray::saveToMemory(MemoryDataStream& mem) const
@@ -2070,6 +2429,13 @@ ODF::Type ODF::Object::getTargetDatatype() const
 	return Type();
 }
 
+void ODF::List::clear()
+{
+	std::visit([](AbstractArray& arr) {
+		arr.clear();
+		}, list);
+}
+
 void ODF::List::clearAndFix()
 {
 	list.emplace<FixedArray>();
@@ -2120,7 +2486,6 @@ void ODF::List::push_back(const ODF& odf)
 	std::visit([&odf](ODF::AbstractArray& base) {
 		base.push_back(odf);
 		}, list);
-	if (auto ptr = std::get_if<ODF::Array::>)
 }
 
 void ODF::List::push_front(const ODF& odf)
@@ -2182,12 +2547,12 @@ const ODF& ODF::List::operator[](size_t index) const
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
 }
 
-std::vector<ODF>& ODF::List::getIterationContainer()
+std::vector<ODF>& ODF::List::getArrayContainer()
 {
 	if (auto ptr = std::get_if<MixedArray>(&list))
-		return ptr->getIterationContainer();
+		return ptr->getArrayContainer();
 	else if (auto ptr = std::get_if<FixedArray>(&list))
-		return ptr->getIterationContainer();
+		return ptr->getArrayContainer();
 	else
 		return *(std::vector<ODF>*)nullptr; // should never be reached. Fuck this.
 }
@@ -2332,3 +2697,91 @@ void ODF::MixedArraySpecifier::loadFromMemory(MemoryDataStream& mem)
 ODF::InvalidCondition::InvalidCondition(const std::string& message) : runtime_error(message) {}
 
 ODF::SpecifierMismatch::SpecifierMismatch(const std::string& message) : runtime_error(message) {}
+
+ODF::InvalidType::InvalidType(const std::string& message) : std::runtime_error(message) {}
+
+ODF::InvalidConversion::InvalidConversion(const std::string& message) : std::runtime_error(message) {}
+
+void ODF::AbstractObject::insert(std::string& key, const ODF& odf)
+{
+	map.insert(std::make_pair(key, odf));
+}
+
+void ODF::AbstractObject::insert(const Pair& value)
+{
+	map.insert(value);
+}
+
+void ODF::AbstractObject::insert(const std::map<std::string, ODF>& map)
+{
+	for (const Pair& it : map)
+		insert(it);
+}
+
+void ODF::AbstractObject::insert(const std::unordered_map<std::string, ODF>& umap)
+{
+	for (const Pair& it : map)
+		insert(it);
+}
+
+void ODF::AbstractObject::insert(const std::vector<Pair>& pairs)
+{
+	for (const Pair& it : pairs)
+		insert(it);
+}
+
+void ODF::AbstractObject::insert(const std::initializer_list<Pair>& pairs)
+{
+	for (const Pair& it : pairs)
+		insert(it);
+}
+
+void ODF::AbstractObject::erase(std::string& key)
+{
+	map.erase(key);
+}
+
+bool ODF::AbstractObject::contains(const std::string& key) const
+{
+	return map.contains(key);
+}
+
+size_t ODF::AbstractObject::count(const std::string& key) const
+{
+	return map.count(key);
+}
+
+ODF& ODF::AbstractObject::at(const std::string& key)
+{
+	return map.at(key);
+}
+
+const ODF& ODF::AbstractObject::at(const std::string& key) const
+{
+	return map.at(key);
+}
+
+ODF& ODF::AbstractObject::operator[](const std::string& key)
+{
+	return map[key];
+}
+
+ODF::AbstractObject::ConstIterator ODF::AbstractObject::begin() const noexcept
+{
+	return map.begin();
+}
+
+ODF::AbstractObject::ConstIterator ODF::AbstractObject::end() const noexcept
+{
+	return map.end();
+}
+
+std::map<std::string, ODF>& ODF::AbstractObject::getObjectContainer()
+{
+	return map;
+}
+
+void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem) const
+{
+
+}
