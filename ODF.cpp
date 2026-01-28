@@ -5,6 +5,29 @@ bool ODF::Config::PreventAutomaticMergeLossString = true;
 unsigned char ODF::Config::DefaultIntegerMergeSize = 0;
 
 #pragma region specifiers
+void ODF::Type::makeImmutable()
+{
+#ifdef _DEBUG
+	if (immutable)
+		std::cout << "Warning: ODF::Type::makeImmutable() called although object is already immutable\n";
+#endif
+	immutable = true;
+}
+
+void ODF::Type::checkImmutable() const
+{
+	if (immutable)
+	{
+		THROW InvalidTypeMutation();
+	}
+}
+
+void ODF::Type::readTypeSpecifier(MemoryDataStream& mem)
+{
+	checkImmutable();
+	*this = mem.readTypeSpecifier<unsigned char>();
+}
+
 ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 {
 	// specifier priorities:
@@ -69,7 +92,7 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 	destroyComplexSpec(); // destroy the last complexSpec if the object was already in use
 
 	// load primitive type specifier, to allow isFixed() check
-	type = mem.read<unsigned char>(); // prio 1
+	readTypeSpecifier(mem); // prio 1
 	bool obj = type.isObject();
 	bool list = type.isList();
 	bool fixed = type.isFixed();
@@ -146,7 +169,6 @@ ODF::TypeSpecifier::operator Type() const
 
 ODF::TypeSpecifier& ODF::TypeSpecifier::operator=(unsigned char byte)
 {
-	// TODO: hier return-Anweisung eingeben
 	type = byte;
 	return *this;
 }
@@ -466,8 +488,58 @@ ODF::MixedObjectSpecifier* ODF::Type::mixedObjectSpecifier() const
 	return nullptr;
 }
 
+bool ODF::Type::isConvertableTo(const Type& other) const
+{
+	if (other.getTypeClass() != getTypeClass())
+		return false;
+	if (getTypeClass() != TypeClass::Int || getTypeClass() != TypeClass::Float)
+		return false;
+	if (getSize() > other.getSize())
+		return false;
+	if (getSize() < other.getSize())
+		return true;
+	return isUnsigned() == other.isUnsigned();
+}
+
+bool ODF::Type::isUnsigned() const
+{
+	using TS = TypeSpecifier;
+	switch (type)
+	{
+	case TS::UBYTE:
+	case TS::USHORT:
+	case TS::UINT:
+	case TS::ULONG:
+		return true;
+	default:
+		return false;
+	}
+}
+
+unsigned char ODF::Type::getSize() const
+{
+	using TS = TypeSpecifier;
+	switch (type)
+	{
+	case TS::BYTE: return sizeof(INT_8);
+	case TS::UBYTE: return sizeof(UINT_8);
+	case TS::SHORT: return sizeof(INT_16);
+	case TS::USHORT: return sizeof(UINT_16);
+	case TS::INT: return sizeof(INT_32);
+	case TS::UINT: return sizeof(UINT_32);
+	case TS::LONG: return sizeof(INT_64);
+	case TS::ULONG: return sizeof(UINT_64);
+	case TS::FLOAT: return sizeof(float);
+	case TS::DOUBLE: return sizeof(double);
+	case TS::CSTR: return 1;
+	case TS::WSTR: return 2;
+	default: return 3;
+	}
+}
+
 void ODF::Type::setFixType(const Type& type)
 {
+	checkImmutable();
 	if (isPrimitive() || isMixed())
 	{
 		THROW InvalidType();
@@ -537,11 +609,13 @@ const std::map<std::string, ODF::Type>* ODF::Type::getObjectTypes() const
 
 void ODF::Type::setSSS(unsigned char sss)
 {
+	checkImmutable();
 	type = (unsigned char)((type.byte() & 0b00'111111) | sss);
 }
 
 void ODF::Type::destroyComplexSpec()
 {
+	checkImmutable();
 	if (complexSpec)
 		delete complexSpec;
 	complexSpec = nullptr;
@@ -549,12 +623,14 @@ void ODF::Type::destroyComplexSpec()
 
 void ODF::Type::makeComplexSpec()
 {
+	checkImmutable(); // only here for clarity, technically not needed because the type remains unchanged
 	if (!complexSpec)
 		complexSpec = new ComplexSpecifier;
 }
 
 void ODF::Type::resetComplexSpec()
 {
+	checkImmutable();
 	destroyComplexSpec();
 	complexSpec = new ComplexSpecifier;
 }
@@ -681,11 +757,21 @@ ODF& ODF::operator=(const std::string& str)
 	return *this;
 }
 
+ODF& ODF::operator=(const char* str)
+{
+	*this = std::string(str);
+}
+
 ODF& ODF::operator=(const std::wstring& wstr)
 {
 	type = TypeSpecifier::WSTR;
 	content = wstr;
 	return *this;
+}
+
+ODF& ODF::operator=(const wchar_t* wstr)
+{
+	*this = std::wstring(wstr);
 }
 
 ODF& ODF::operator=(const Object& obj)
@@ -897,6 +983,12 @@ ODF::ODF(const List::FixedArray& farr) : ODF()
 }
 
 ODF::ODF(const std::initializer_list<ODF>& initializer_list) : ODF(List::MixedArray(initializer_list)) {}
+
+ODF& ODF::immutable()
+{
+	type.makeImmutable();
+	return *this;
+}
 
 bool ODF::isConvertableTo(const Type& other) const
 {
@@ -1474,6 +1566,11 @@ void ODF::makeList(const TypeSpecifier& elementType)
 	makeList(Type(elementType));
 }
 
+bool ODF::Type::operator!()
+{
+	return type == TypeSpecifier::NULLTYPE;
+}
+
 ODF::Type::operator unsigned char()
 {
 	return type;
@@ -1484,6 +1581,7 @@ ODF::Type& ODF::Type::operator=(const Type& other)
 	if (&other == this)
 		return *this;
 
+	checkImmutable();
 	type = other.type;
 	if (complexSpec) delete complexSpec;
 	complexSpec = nullptr;
@@ -1498,28 +1596,71 @@ ODF::Type& ODF::Type::operator=(const Type& other)
 
 ODF::TypeSpecifier ODF::Type::operator=(TypeSpecifier type)
 {
-	setType(type);
+	setType(type); // checkImmutable is called here
 	return type;
 }
 
-ODF::Type::Type()
-{
-	complexSpec = nullptr;
-}
+ODF::Type::Type() : complexSpec(nullptr), immutable(false) {}
 
-ODF::Type::Type(const Type& other)
+ODF::Type::Type(const Type& other) : complexSpec(nullptr), immutable(false)
 {
-	complexSpec = nullptr;
 	*this = other;
 }
 
-ODF::Type::Type(TypeSpecifier type) : complexSpec(nullptr)
+ODF::Type::Type(TypeSpecifier type) : complexSpec(nullptr), immutable(false)
 {
 	*this = type;
 }
 
 ODF::Type::~Type()
 {
+}
+
+ODF::Type ODF::Type::findBestType(TypeClass tc, unsigned char size, bool unsign)
+{
+	switch (tc)
+	{
+	case TypeClass::Int:
+		switch (size)
+		{
+		case sizeof(INT_8):
+			if (unsign) return Type(TypeSpecifier::UBYTE);
+			else return Type(TypeSpecifier::BYTE);
+		case sizeof(INT_16):
+			if (unsign) return Type(TypeSpecifier::USHORT);
+			else return Type(TypeSpecifier::SHORT);
+		case sizeof(INT_32):
+			if (unsign) return Type(TypeSpecifier::UINT);
+			else return Type(TypeSpecifier::INT);
+		case sizeof(INT_64):
+			if (unsign) return Type(TypeSpecifier::ULONG);
+			else return Type(TypeSpecifier::LONG);
+		default:
+			THROW InvalidCondition();
+		}
+	case TypeClass::Float:
+		switch (size)
+		{
+		case sizeof(float):
+			return Type(TypeSpecifier::FLOAT);
+		case sizeof(double):
+			return Type(TypeSpecifier::DOUBLE);
+		default:
+			THROW InvalidCondition();
+		}
+	case TypeClass::String:
+		switch (size)
+		{
+		case 1:
+			return Type(TypeSpecifier::CSTR);
+		case 2:
+			return Type(TypeSpecifier::WSTR);
+		default:
+			THROW InvalidCondition();
+		}
+	default:
+		THROW InvalidCondition();
+	}
 }
 
 #pragma endregion
@@ -1612,16 +1753,16 @@ void ODF::SizeSpecifier::load(MemoryDataStream& mem, TypeSpecifier type)
 	switch (type.operator unsigned char() >> 6) // looks cursed
 	{
 	case 0b00:
-		actualSize = mem.read<UINT_8>();
+		actualSize = mem.readTypeSpecifier<UINT_8>();
 		return;
 	case 0b01:
-		actualSize = mem.read<UINT_16>();
+		actualSize = mem.readTypeSpecifier<UINT_16>();
 		return;
 	case 0b10:
-		actualSize = mem.read<UINT_32>();
+		actualSize = mem.readTypeSpecifier<UINT_32>();
 		return;
 	case 0b11:
-		actualSize = mem.read<UINT_64>();
+		actualSize = mem.readTypeSpecifier<UINT_64>();
 		return;
 	}
 }
@@ -1686,6 +1827,7 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 
 void ODF::Type::setType(TypeSpecifier type)
 {
+	checkImmutable();
 	if (complexSpec) delete complexSpec;
 
 	this->type = type;
@@ -1783,7 +1925,7 @@ void ODF::TypeSpecifier::saveToMemory(MemoryDataStream& mem) const
 
 void ODF::TypeSpecifier::loadFromMemory(MemoryDataStream& mem)
 {
-	*this = mem.read<Type>();
+	*this = mem.readTypeSpecifier<Type>();
 }
 
 inline bool ODF::Type::isMixed() const
@@ -1902,34 +2044,34 @@ ODF::Status ODF::loadBody(MemoryDataStream& mem)
 	switch (type.getVariantType())
 	{
 	case VT_INT8:
-		content = mem.read<INT_8>();
+		content = mem.readTypeSpecifier<INT_8>();
 		return Status::Ok;
 	case VT_UINT8:
-		content = mem.read<UINT_8>();
+		content = mem.readTypeSpecifier<UINT_8>();
 		return Status::Ok;
 	case VT_INT16:
-		content = mem.read<INT_16>();
+		content = mem.readTypeSpecifier<INT_16>();
 		return Status::Ok;
 	case VT_UINT16:
-		content = mem.read<UINT_16>();
+		content = mem.readTypeSpecifier<UINT_16>();
 		return Status::Ok;
 	case VT_INT32:
-		content = mem.read<INT_32>();
+		content = mem.readTypeSpecifier<INT_32>();
 		return Status::Ok;
 	case VT_UINT32:
-		content = mem.read<UINT_32>();
+		content = mem.readTypeSpecifier<UINT_32>();
 		return Status::Ok;
 	case VT_INT64:
-		content = mem.read<INT_64>();
+		content = mem.readTypeSpecifier<INT_64>();
 		return Status::Ok;
 	case VT_UINT64:
-		content = mem.read<UINT_64>();
+		content = mem.readTypeSpecifier<UINT_64>();
 		return Status::Ok;
 	case VT_FLOAT:
-		content = mem.read<float>();
+		content = mem.readTypeSpecifier<float>();
 		return Status::Ok;
 	case VT_DOUBLE:
-		content = mem.read<double>();
+		content = mem.readTypeSpecifier<double>();
 		return Status::Ok;
 	case VT_CSTR:
 		content = mem.readStr();
@@ -2209,6 +2351,13 @@ std::vector<ODF>& ODF::AbstractArray::getArrayContainer()
 	return list;
 }
 
+void ODF::AbstractArray::saveToMemory(MemoryDataStream& mem) const
+{
+	// only the body is saved
+	for (const ODF& odf : list)
+		odf.saveBody(mem);
+}
+
 ODF* ODF::AbstractArray::begin() const noexcept
 {
 	return list.empty() ? nullptr : (ODF*)list.data();
@@ -2237,8 +2386,6 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
 	if (realType == fixType)
 		list.push_back(odf);
-	else if (fails)
-		fails->push_back(&odf);
 	else
 	{
 		// try converting the element to the desired type
@@ -2247,27 +2394,54 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 		else
 		{
 			// thrown an exception if it is not convertable
-			THROW std::bad_variant_access();
+			THROW TypeMismatch();
 		}
 	}
+	list[list.size() - 1].type.makeImmutable();
 }
 
 void ODF::List::FixedArray::push_front(const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
-	if (odf.getComplexType() == fixType)
-		list.insert(list.begin(), odf);
-	else if (fails)
-		fails->push_back(&odf);
+	Type realType = odf.getComplexType();
+	if (fixType.type == TypeSpecifier::NULLTYPE) // if fixtype is NULL it will be set correctly
+		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
+	if (realType == fixType)
+		push_front(odf);
+	else
+	{
+		// try converting the element to the desired type
+		if (odf.isConvertableTo(fixType))
+			push_front(odf.getAs(fixType));
+		else
+		{
+			// thrown an exception if it is not convertable
+			THROW TypeMismatch();
+		}
+	}
+	list[0].type.makeImmutable();
 }
 
 void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
-	if (odf.getComplexType() == fixType)
+	Type realType = odf.getComplexType();
+	if (fixType.type == TypeSpecifier::NULLTYPE) // if fixtype is NULL it will be set correctly
+		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
+	if (realType == fixType)
 		list.insert(list.begin() + where, odf);
-	else if (fails)
-		fails->push_back(&odf);
+	else
+	{
+		// try converting the element to the desired type
+		if (odf.isConvertableTo(fixType))
+			list.insert(list.begin() + where, odf.getAs(fixType));
+		else
+		{
+			// thrown an exception if it is not convertable
+			THROW TypeMismatch();
+		}
+	}
+	list[where + 1].type.makeImmutable(); // where is the index of the elemet before the new elememt
 }
 
 void ODF::List::FixedArray::updateSize(Type& type) const
@@ -2278,7 +2452,40 @@ void ODF::List::FixedArray::updateSize(Type& type) const
 
 void ODF::List::FixedArray::setType(const Type& type)
 {
+	if (list.empty())
+	{
+		fixType = type;
+		return;
+	}
+	if (!isConvertableTo(type))
+	{
+		THROW InvalidConversion();
+	}
+	convertTo(type);
+}
+
+bool ODF::List::FixedArray::isConvertableTo(const Type& newFixType) const
+{
+	// check every element if it is convertable to newFixType.
+	// simply checking for fixtype isn't sufficient as isConvertableTo also depends on the actual value in stored in the ODF object
+	for (const ODF& odf : list)
+		if (!odf.isConvertableTo(newFixType))
+			return false;
+	return true;
+}
+
+bool ODF::List::FixedArray::convertTo(const Type& type)
+{
 	fixType = type;
+	for (ODF& odf : list)
+		odf.convertTo(fixType);
+}
+
+bool ODF::List::FixedArray::convertTo(std::function<Type(const std::vector<ODF>&)> type, std::function<void(ODF& odf)> converter)
+{
+	fixType = type(list);
+	for (ODF& odf : list)
+		converter(odf);
 }
 
 void ODF::List::FixedArray::resize(size_t newSize)
@@ -2293,29 +2500,6 @@ inline const ODF::Type& ODF::List::FixedArray::getType() const
 	return fixType;
 }
 
-inline void ODF::List::FixedArray::enableFailRegistry(bool enable)
-{
-}
-
-bool ODF::List::FixedArray::fail() const
-{
-	return false; // TODO
-}
-
-inline const std::vector<const ODF*>& ODF::List::FixedArray::getFails()
-{
-	// TODO: hier return-Anweisung eingeben
-	std::vector<const ODF*> TODO;
-	return TODO;
-}
-
-void ODF::List::FixedArray::saveToMemory(MemoryDataStream& mem) const
-{
-	// only the body is saved
-	for (const ODF& odf : list)
-		odf.saveBody(mem);
-}
-
 void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem)
 {
 	// only the body is loaded. Size is already filled into list by external code (loading of specifiers in root object)
@@ -2326,57 +2510,8 @@ void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem)
 	}
 }
 
-ODF::List::FixedArray::FixedArray() : fails(nullptr)
+ODF::List::FixedArray::FixedArray()
 {
-}
-
-bool ODF::List::MixedArray::canBeFixed(FixInfo* info) const
-{
-	// check for same type, as this is the default case where the caller already constructed a valid Fixed List inside a Mixed List
-	if (!list.size()) // empty lists cannot be fixed, as no Type is provided.
-		return false;
-	Type complexType = list[0].getComplexType();
-	bool match = true;
-	for (size_t i = 1; i < list.size(); i++)
-		if (list[i].getComplexType() != complexType)
-		{
-			match = false;
-			break;
-		}
-	if (match)
-	{
-		if (info)
-		{
-			info->tcmatch = false;
-			info->targetType = complexType;
-		}
-		return true;
-	}
-
-	// check for an integer or float type match
-	TypeClass tc = list[0].getTypeClass();
-	if (tc == TypeClass::Int) // ?? DOes not work btw (was previously tc == TypeClass::Other)
-		return false;
-
-	// check whole list and get max precision
-	for (size_t i = 1; i < list.size(); i++)
-		if (list[i].getTypeClass() != tc)
-			return false;
-
-	// no match possible
-	if (info)
-	{
-		info->tcmatch = true;
-		info->tc = tc;
-	}
-	return true;
-}
-
-void ODF::List::MixedArray::saveToMemory(MemoryDataStream& mem) const
-{
-	// save only the body
-	for (const ODF odf : list)
-		odf.saveBody(mem);
 }
 
 void ODF::List::MixedArray::loadFromMemory(MemoryDataStream& mem)
@@ -2396,22 +2531,45 @@ ODF::List::MixedArray::MixedArray(const std::initializer_list<ODF>& initializer_
 		list.push_back(odf);
 }
 
-ODF::List::FixedArray::InvalidTypeChange::InvalidTypeChange(std::string message) : runtime_error(message)
+ODF::List::FixedArray::InvalidTypeChange::InvalidTypeChange(std::string message) : runtime_error(message) {}
+
+ODF::Type ODF::Object::canBeFixed() const
 {
+	if (!size())
+		return Type(TypeSpecifier::UNDEFINED);
+	// first check if all elements have the same type class
+	const MixedObject& mixed = std::get<MixedObject>(object);
+	const ODF& first = mixed.begin()->second;
+	TypeClass tc = first.getTypeClass();
+	bool unsign = first.type.isUnsigned();
+
+	// check all elemets (first elements is check twice but i'll leave it like that. And if we're already iterating, find the largest type size
+	unsigned char largestSize = 0;
+	for (const IteratorType& it : mixed)
+	{
+		if (tc != it.second.getTypeClass())
+			return Type(TypeSpecifier::NULLTYPE);
+		if (unsign != it.second.type.isUnsigned())
+			return Type(TypeSpecifier::NULLTYPE);
+		largestSize = std::max(largestSize, it.second.type.getSize());
+	}
+
+	// now return the type
+	return Type::findBestType(tc, largestSize, unsign);
 }
 
-void ODF::Object::makeMixed() const
+bool ODF::Object::tryFixing()
 {
-}
+	Type newFixType = canBeFixed();
+	if (!newFixType)
+		return false;
 
-bool ODF::Object::canBeFixed() const
-{
-	return false;
-}
+	MixedObject old = std::get<MixedObject>(object);
+	FixedObject& fobj = object.emplace<FixedObject>();
 
-bool ODF::Object::tryFixing() const
-{
-	return false;
+	for (const IteratorType& it : old)
+		fobj.insert(it.first, it.second.getAs(newFixType));
+	return true;
 }
 
 bool ODF::Object::isMixed() const
@@ -2421,12 +2579,7 @@ bool ODF::Object::isMixed() const
 
 ODF::Type ODF::Object::getFixedDatatype() const
 {
-	return Type();
-}
-
-ODF::Type ODF::Object::getTargetDatatype() const
-{
-	return Type();
+	return std::get<FixedObject>(object).getType();
 }
 
 void ODF::List::clear()
@@ -2436,34 +2589,118 @@ void ODF::List::clear()
 		}, list);
 }
 
+void ODF::Object::loadFromMemory(MemoryDataStream& mem)
+{
+	std::visit([&mem](AbstractObject& aobj) {
+		aobj.loadFromMemory(mem);
+		}, object);
+}
+
+void ODF::Object::saveToMemory(MemoryDataStream& mem) const
+{
+	std::visit([&mem](const AbstractObject& aobj) {
+		aobj.saveToMemory(mem);
+		}, object);
+}
+
+void ODF::Object::clear()
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.clear();
+		}, object);
+}
+
+void ODF::Object::clearAndFix()
+{
+	FixedObject& fobj = object.emplace<FixedObject>();
+	fobj.clear();
+	fobj.setType(Type(TypeSpecifier::NULLTYPE));
+}
+
+void ODF::Object::clearAndFix(const ODF::Type& elementType)
+{
+	FixedObject& fobj = object.emplace<FixedObject>();
+	fobj.clear();
+	fobj.setType(elementType);
+}
+
+void ODF::Object::clearAndMix()
+{
+	object.emplace<MixedObject>().clear();
+}
+
+void ODF::Object::makeMixed()
+{
+	FixedObject old = std::get<FixedObject>(object);
+	MixedObject& mixed = object.emplace<MixedObject>();
+
+	for (const IteratorType& it : old)
+		mixed.insert(it);
+}
+
 void ODF::List::clearAndFix()
 {
-	list.emplace<FixedArray>();
+	list.emplace<FixedArray>().clear();
 }
 
 void ODF::List::clearAndFix(const Type& elementType)
 {
-	list.emplace<FixedArray>();
+	list.emplace<FixedArray>().clear();
 	std::get<FixedArray>(list).setType(elementType);
 }
 
 void ODF::List::clearAndMix()
 {
-	list.emplace<MixedArray>();
+	list.emplace<MixedArray>().clear();
+	std::get<FixedArray>(list).setType(ODF::Type(ODF::TypeSpecifier::NULLTYPE));
 }
 
-void ODF::List::makeMixed() const
+void ODF::List::makeMixed()
 {
+	FixedArray old = std::get<FixedArray>(list);
+	MixedArray& mixed = list.emplace<MixedArray>();
+
+	for (const ODF& odf : old)
+		mixed.push_back(odf);
 }
 
-bool ODF::List::canBeFixed() const
+ODF::Type ODF::List::canBeFixed() const
 {
-	return false;
+	if (!size())
+		return Type(TypeSpecifier::UNDEFINED);
+	// first check if all elements have the same type class
+	const MixedArray& mixed = std::get<MixedArray>(list);
+	const ODF& first = *mixed.begin();
+	TypeClass tc = first.getTypeClass();
+	bool unsign = first.type.isUnsigned();
+
+	// check all elemets (first elements is check twice but i'll leave it like that. And if we're already iterating, find the largest type size
+	unsigned char largestSize = 0;
+	for (const ODF& it : mixed)
+	{
+		if (tc != it.getTypeClass())
+			return Type(TypeSpecifier::NULLTYPE);
+		if (unsign != it.type.isUnsigned())
+			return Type(TypeSpecifier::NULLTYPE);
+		largestSize = std::max(largestSize, it.type.getSize());
+	}
+
+	// now return the type
+	return Type::findBestType(tc, largestSize, unsign);
 }
 
-bool ODF::List::tryFixing() const
+bool ODF::List::tryFixing()
 {
-	return false;
+	Type newFixType = canBeFixed();
+	if (!newFixType)
+		return false;
+
+	MixedArray old = std::get<MixedArray>(list);
+	FixedArray& farr = list.emplace<FixedArray>();
+
+	for (ODF& odf : old)
+		farr.push_back(odf.getAs(newFixType));
+	return true;
 }
 
 bool ODF::List::isMixed() const
@@ -2474,11 +2711,6 @@ bool ODF::List::isMixed() const
 ODF::Type ODF::List::getFixedDatatype() const
 {
 	return std::get<FixedArray>(list).getType();
-}
-
-ODF::Type ODF::List::getTargetDatatype() const
-{
-	return Type();
 }
 
 void ODF::List::push_back(const ODF& odf)
@@ -2590,18 +2822,16 @@ void ODF::List::resetAndSetSize(size_t newSize, const Type& newType)
 
 void ODF::List::saveToMemory(MemoryDataStream& mem) const
 {
-	if (isMixed())
-		std::get<MixedArray>(list).saveToMemory(mem);
-	else
-		std::get<FixedArray>(list).saveToMemory(mem);
+	std::visit([&mem](const AbstractArray& aar) {
+		aar.saveToMemory(mem);
+		}, list);
 }
 
 void ODF::List::loadFromMemory(MemoryDataStream& mem)
 {
-	if (isMixed())
-		const_cast<MixedArray&>(std::get<MixedArray>(list)).loadFromMemory(mem);
-	else
-		const_cast<FixedArray&>(std::get<FixedArray>(list)).loadFromMemory(mem);
+	std::visit([&mem](AbstractArray& aar) {
+		aar.loadFromMemory(mem);
+		}, list);
 }
 
 ODF::List& ODF::List::operator=(const List& other)
@@ -2702,7 +2932,7 @@ ODF::InvalidType::InvalidType(const std::string& message) : std::runtime_error(m
 
 ODF::InvalidConversion::InvalidConversion(const std::string& message) : std::runtime_error(message) {}
 
-void ODF::AbstractObject::insert(std::string& key, const ODF& odf)
+void ODF::AbstractObject::insert(const std::string& key, const ODF& odf)
 {
 	map.insert(std::make_pair(key, odf));
 }
@@ -2736,7 +2966,7 @@ void ODF::AbstractObject::insert(const std::initializer_list<Pair>& pairs)
 		insert(it);
 }
 
-void ODF::AbstractObject::erase(std::string& key)
+void ODF::AbstractObject::erase(const std::string& key)
 {
 	map.erase(key);
 }
@@ -2749,6 +2979,11 @@ bool ODF::AbstractObject::contains(const std::string& key) const
 size_t ODF::AbstractObject::count(const std::string& key) const
 {
 	return map.count(key);
+}
+
+void ODF::AbstractObject::clear()
+{
+	map.clear();
 }
 
 ODF& ODF::AbstractObject::at(const std::string& key)
@@ -2781,7 +3016,233 @@ std::map<std::string, ODF>& ODF::AbstractObject::getObjectContainer()
 	return map;
 }
 
-void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem) const
+void ODF::AbstractObject::saveToMemory(MemoryDataStream& mem) const
 {
+	// save only the bodies
+	for (const IteratorType& it : map)
+		it.second.saveBody(mem);
+}
 
+void ODF::Object::MixedObject::loadFromMemory(MemoryDataStream& mem)
+{
+	// load all the value bodies. Types must be externally specified from the parent ODF object
+	for (IteratorType& it : map)
+		it.second.loadBody(mem);
+}
+
+ODF::Object::MixedObject::MixedObject()
+{
+}
+
+ODF::Object::MixedObject::MixedObject(const std::initializer_list<Pair>& elements)
+{
+	for (const Pair& it : elements)
+		insert(it);
+}
+
+void ODF::Object::FixedObject::insert(const std::string& key, const ODF& odf)
+{
+	Type realType = odf.getComplexType();
+	if (fixType.type == TypeSpecifier::NULLTYPE) // if fix type is null it will be set
+		fixType = realType;
+	if (realType == fixType) // only insert matching types
+		map.insert(std::make_pair(key, odf));
+	else
+	{
+		// insertion failed because of a type mismatch. Try to convert the elemet to the desired type. Throw if still not convertable
+		if (odf.isConvertableTo(fixType))
+			map.insert(std::make_pair(key, odf.getAs(fixType)));
+		else
+		{
+			THROW TypeMismatch();
+		}
+	}
+	map[key].type.makeImmutable();
+}
+
+void ODF::Object::FixedObject::insert(const Pair& pair)
+{
+	Type realType = pair.second.getComplexType();
+	if (fixType.type == TypeSpecifier::NULLTYPE) // if fix type is null it will be set
+		fixType = realType;
+	if (realType == fixType) // only insert matching types
+		map.insert(pair);
+	else
+	{
+		// insertion failed because of a type mismatch. Try to convert the elemet to the desired type. Throw if still not convertable
+		if (pair.second.isConvertableTo(fixType))
+			map.insert(std::make_pair(pair.first, pair.second.getAs(fixType)));
+		else
+		{
+			THROW TypeMismatch();
+		}
+	}
+	map[pair.first].type.makeImmutable();
+}
+
+void ODF::Object::FixedObject::insert(const std::map<std::string, ODF>& map)
+{
+	for (const IteratorType& it : map)
+		insert(it);
+}
+
+void ODF::Object::FixedObject::insert(const std::unordered_map<std::string, ODF>& umap)
+{
+	for (const IteratorType& it : umap)
+		insert(it);
+}
+
+void ODF::Object::FixedObject::insert(const std::vector<Pair>& pairs)
+{
+	for (const Pair& it : pairs)
+		insert(it);
+}
+
+void ODF::Object::FixedObject::insert(const std::initializer_list<Pair>& pairs)
+{
+	for (const Pair& it : pairs)
+		insert(it);
+}
+
+ODF& ODF::Object::FixedObject::operator[](const std::string& key)
+{
+	if (auto element = map.find(key); element != map.end())
+	{
+		return element->second;
+	}
+	else
+	{
+		return map[key].immutable();
+	}
+}
+
+ODF& ODF::Object::FixedObject::at(const std::string& key)
+{
+	return map.at(key);
+}
+
+const ODF& ODF::Object::FixedObject::at(const std::string& key) const
+{
+	return map.at(key);
+}
+
+void ODF::Object::FixedObject::setType(const Type& type)
+{
+	if (map.empty())
+	{
+		fixType = type;
+		return;
+	}
+	if (!isConvertableTo(type))
+	{
+		THROW InvalidConversion();
+	}
+	convertTo(type);
+}
+
+bool ODF::Object::FixedObject::isConvertableTo(const Type& newFixType) const
+{
+	// check every element if it is convertable to newFixType.
+	// simply checking for fixtype isn't sufficient as isConvertableTo also depends on the actual value in stored in the ODF object
+	for (const IteratorType& it : map)
+		if (!it.second.isConvertableTo(newFixType))
+			return false;
+	return true;
+}
+
+bool ODF::Object::FixedObject::convertTo(const Type& type)
+{
+	fixType = type;
+	for (IteratorType& pair : map)
+		pair.second.convertTo(fixType);
+}
+
+bool ODF::Object::FixedObject::convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter)
+{
+	fixType = type(map);
+	for (IteratorType& pair : map)
+		converter(pair.second);
+}
+
+const ODF::Type& ODF::Object::FixedObject::getType() const
+{
+	return fixType;
+}
+
+void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem)
+{
+	for (IteratorType& it : map)
+	{
+		it.second.type = fixType;
+		it.second.loadBody(mem);
+	}
+}
+
+ODF::Object::FixedObject::FixedObject()
+{
+}
+
+ODF::InvalidTypeMutation::InvalidTypeMutation(const std::string& message) : runtime_error(message) {}
+
+void ODF::Object::insert(const std::string& key, const ODF& odf)
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.insert(key, odf);
+		}, object);
+}
+
+void ODF::Object::insert(const Pair& value)
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.insert(value);
+		}, object);
+}
+
+void ODF::Object::insert(const std::map<std::string, ODF>& map)
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.insert(map);
+		}, object);
+}
+
+void ODF::Object::insert(const std::unordered_map<std::string, ODF>& umap)
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.insert(umap);
+		}, object);
+}
+
+void ODF::Object::insert(const std::vector<Pair>& pairs)
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.insert(pairs);
+		}, object);
+}
+
+void ODF::Object::insert(const std::initializer_list<Pair>& pairs)
+{
+	std::visit([&](AbstractObject& aobj) {
+		aobj.insert(pairs);
+		}, object);
+}
+
+ODF& ODF::Object::operator[](const std::string& key)
+{
+	return std::visit([&](AbstractObject& aobj) -> ODF& {
+		return aobj[key];
+		}, object);
+}
+
+ODF& ODF::Object::at(const std::string& key)
+{
+	std::visit([&](AbstractObject& aobj) -> ODF& {
+		return aobj.at(key);
+		}, object);
+}
+
+const ODF& ODF::Object::at(const std::string& key) const
+{
+	std::visit([&](const AbstractObject& aobj) -> const ODF& {
+		return aobj.at(key);
+		}, object);
 }

@@ -25,13 +25,16 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 }
 
 // TODO
+// implement function forwarding for Object Types
 // implement conversion mechanics for complex types
-// implement objects
-// implement for fixing mechanics
+
+// planned features
+// typedef support
+// using types from exteral files
 
 int main()
 {
-	// goals:
+	// goal:
 	// odf = {
 	//   { "key", value },
 	//   { "key2", value2 }
@@ -47,7 +50,8 @@ int main()
 		odf.push_back(6ui32);
 		odf.push_back(7);
 
-		odf.clear();
+		odf[1].convertTo(ODF::Type(ODF::TypeSpecifier::BYTE)); // illegal ?
+		odf[1] = "fisch"; // illegal ?
 
 		odf.push_back(5ui32);
 

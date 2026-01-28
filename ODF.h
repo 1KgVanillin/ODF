@@ -53,9 +53,15 @@ public:
 	{
 		InvalidType(const std::string& message = "InvalidType exception");
 	};
+	// Thrown if a conversion function is called for object of a different typeclass
 	struct InvalidConversion : public std::runtime_error
 	{
 		InvalidConversion(const std::string& message = "InvalidConversion exception");
+	};
+	// Thrown if a function attempts to change a type that is currently immutable
+	struct InvalidTypeMutation : public std::runtime_error
+	{
+		InvalidTypeMutation(const std::string& message = "InvalidTypeMutation exception");
 	};
 
 
@@ -214,10 +220,14 @@ public:
 	typedef std::variant<MixedArraySpecifier, FixedArraySpecifier> ArraySpecifier;
 	struct Type // a full type header
 	{ // pointers are used as optionals. Deallocated in destructor
-		TypeSpecifier type;
+		TypeSpecifier type; // Note that immutable must be false to change this. If write-accessing this member manually, a check to immutable is needed
+		bool immutable; // if true, an InvalidTypeMutation is thrown if a non-const member fucntion is called
 		typedef std::variant<ObjectSpecifier, ArraySpecifier> ComplexSpecifier;
 		ComplexSpecifier* complexSpec; // holds object specification optionallly
 
+		void makeImmutable();
+		void checkImmutable() const;
+		void readTypeSpecifier(MemoryDataStream& mem); // loads the type specifier from a stream and performs mutation check
 		void clear(); // deletes every optional specifier
 		Status saveToMemory(MemoryDataStream& mem) const;
 		Status loadFromMemory(MemoryDataStream& mem);
@@ -240,6 +250,9 @@ public:
 		FixedObjectSpecifier* fixedObjectSpecifier() const;
 		MixedObjectSpecifier* mixedObjectSpecifier() const;
 
+		bool isConvertableTo(const Type& other) const;
+		bool isUnsigned() const; // returs false if not an interger type
+		unsigned char getSize() const; // returns the size in bytes for integer and floating point types, 1 for cstr, 2 for wstr, and 3 for complex types
 		void setFixType(const Type& type);
 		const Type* getFixType() const; // returns the fixtype if the current type is complex and fixed. otherwise returns nullptr
 		TypeClass getTypeClass() const;
@@ -252,6 +265,7 @@ public:
 
 		friend bool operator==(const Type& t1, const Type& t2);
 		friend bool operator!=(const Type& t1, const Type& t2);
+		bool operator!(); // returns !(type != NULL) -> type == NULL
 
 		operator unsigned char();
 		Type& operator=(const Type& other);
@@ -261,6 +275,8 @@ public:
 		Type(const Type& other);
 		Type(TypeSpecifier type);
 		~Type();
+
+		static Type findBestType(TypeClass tc, unsigned char size, bool unsign = false); // only valid for primitive types. unsign is ignored if no integer type
 	};
 
 	// The ArraySpecifier holds all type information that is needed to load or save an array.
@@ -297,16 +313,15 @@ public:
 		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
-	// Data Types
-	class AbstractType
+	// Complex data object functions
+	class AbstractComplexDataObject
 	{
 	public:
-		virtual void makeMixed() const = 0;
-		virtual bool canBeFixed() const = 0;
-		virtual bool tryFixing() const = 0;
+		virtual void makeMixed() = 0;
+		virtual Type canBeFixed() const = 0; // returns NULLTYPE if not fixable and UNDEFINED if empty
+		virtual bool tryFixing() = 0;
 		virtual bool isMixed() const = 0;
 		virtual Type getFixedDatatype() const = 0;
-		virtual Type getTargetDatatype() const = 0;
 	};
 
 	class AbstractObject : public AbstractDataObject
@@ -316,7 +331,8 @@ public:
 	public:
 		typedef std::pair<std::string, ODF> Pair;
 		typedef std::map<std::string, ODF>::const_iterator ConstIterator;
-		virtual void insert(std::string& key, const ODF& odf);
+		typedef std::map<std::string, ODF>::const_iterator::value_type IteratorType;
+		virtual void insert(const std::string& key, const ODF& odf);
 		virtual void insert(const Pair& value);
 		virtual void insert(const std::map<std::string, ODF>& map);
 		virtual void insert(const std::unordered_map<std::string, ODF>& umap);
@@ -326,6 +342,7 @@ public:
 		virtual bool contains(const std::string& key) const;
 		virtual size_t count(const std::string& key) const;
 		virtual size_t size() const;
+		virtual void clear();
 
 		virtual ODF& at(const std::string& key);
 		virtual const ODF& at(const std::string& key) const;
@@ -334,25 +351,67 @@ public:
 		virtual ConstIterator begin() const noexcept;
 		virtual ConstIterator end() const noexcept;
 		virtual std::map<std::string, ODF>& getObjectContainer();
+
+		void saveToMemory(MemoryDataStream& mem) const override; // is the same for both mixed and fixed objects
 	};
 
-	class Object : public AbstractType, public AbstractObject
+	// The just like with the Array, the AbstractObject is an implementation of the MixedAObject. The MixedObject inherits all functions from it and adds loadFromMemory
+	// The FIxedObject inherits the functions of the AbstractObjects, adds a loadFromMemory and overwrites all isnertion and access functions to perform type checks
+	class Object : public AbstractComplexDataObject, public AbstractObject
 	{
 	public:
 		class FixedObject : public AbstractObject
 		{
+			Type fixType;
 		public:
-			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem) override;
+			void insert(const std::string& key, const ODF& odf) override;
+			void insert(const Pair& value) override;
+			void insert(const std::map<std::string, ODF>& map) override;
+			void insert(const std::unordered_map<std::string, ODF>& umap) override;
+			void insert(const std::vector<Pair>& pairs) override;
+			void insert(const std::initializer_list<Pair>& pairs) override;
+			ODF& operator[](const std::string& key) override; // also overwritten by FixedObject, as it could insert elements
+			ODF& at(const std::string& key) override;
+			const ODF& at(const std::string& key) const override;
+
+			void setType(const Type& type); bool isConvertableTo(const Type& newFixType) const; // newFixType must be the new fix type, aka the type that is contained in the array, not the array type itself
+			bool convertTo(const Type& type);
+			bool convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter);
+			const Type& getType() const; // returns the type of the elements contained in the object
+
+			void loadFromMemory(MemoryDataStream& mem) override; // only the fixtype must be set exterally
 
 			FixedObject();
+			template<typename T>
+			FixedObject(const std::initializer_list<std::pair<std::string, T>>& initializer_list)
+			{
+				for (const std::pair<std::string, T>& it : initializer_list)
+					insert(it);
+			}
+			template<typename T>
+			FixedObject(const std::map<std::string, T>& map)
+			{
+				for (const std::pair<std::string, T>& it : map)
+					insert(it);
+			}
+			template<typename T>
+			FixedObject(const std::unordered_map<std::string, T>& umap)
+			{
+				for (const std::pair<std::string, T>& it : umap)
+					insert(it);
+			}
+			template<typename T>
+			FixedObject(const std::vector<std::pair<std::string, T>>& pairs)
+			{
+				for (const std::pair<std::string, T>& it : pairs)
+					insert(it);
+			}
 		};
 
 		class MixedObject : public AbstractObject
 		{
 		public:
-			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem) override;
+			void loadFromMemory(MemoryDataStream& mem) override; // every type must be set externally
 
 			MixedObject();
 			MixedObject(const std::initializer_list<Pair>& elements);
@@ -360,12 +419,29 @@ public:
 		
 		std::variant<FixedObject, MixedObject> object;
 
-		void makeMixed() const override; // TODO
-		bool canBeFixed() const override; // TODO
-		bool tryFixing() const override; // TODO
+		void insert(const std::string& key, const ODF& odf) override;
+		void insert(const Pair& value) override;
+		void insert(const std::map<std::string, ODF>& map) override;
+		void insert(const std::unordered_map<std::string, ODF>& umap) override;
+		void insert(const std::vector<Pair>& pairs) override;
+		void insert(const std::initializer_list<Pair>& pairs) override;
+		ODF& operator[](const std::string& key) override; // also overwritten by FixedObject, as it could insert elements
+		ODF& at(const std::string& key) override;
+		const ODF& at(const std::string& key) const override;
+
+		void loadFromMemory(MemoryDataStream& mem) override; // only the fixtype must be set exterally
+		void saveToMemory(MemoryDataStream& mem) const override;
+
+		void clear() override;
+		void clearAndFix(); // clear and make fixed
+		void clearAndFix(const Type& elementType); // clear and make fixed
+		void clearAndMix(); // clear and make mixed
+		
+		void makeMixed() override; // TODO
+		Type canBeFixed() const override; // TODO
+		bool tryFixing() override; // returns NULLTYPE if not fixable and UNDEFINED if empty
 		bool isMixed() const override; // TODO
-		Type getFixedDatatype() const override; // TODO
-		Type getTargetDatatype() const override; // TODO
+		Type getFixedDatatype() const override; // called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
 	};
 
 
@@ -394,34 +470,29 @@ public:
 		virtual ODF* begin() const noexcept;
 		virtual ODF* end() const noexcept;
 		virtual std::vector<ODF>& getArrayContainer();
+
+		void saveToMemory(MemoryDataStream& mem) const override; // is the same for both fixed and mixed arrays.
 	};
 	
-	class List : public AbstractType, public AbstractArray
+	class List : public AbstractComplexDataObject, public AbstractArray
 	{
 	public:
-		struct PreventSimilarTypeMerge { PreventSimilarTypeMerge() = default; };
 		class FixedArray : public AbstractArray
 		{
 			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
-			std::vector<const ODF*>* fails; // if enabled, this is not nullptr. It stores a const ptr to every ODF object that wasn't inserted into the list because of a type mismatch
 		public:
 			void push_back(const ODF& odf) override;
 			void push_front(const ODF& odf) override;
 			void insert(size_t where, const ODF& odf) override;
 			void updateSize(Type& size) const;
-
-			template<typename T>
-			void convert(std::function<T(const ODF& odf)> converter); // TODO
+			void resize(size_t newSize) override;
 
 			void setType(const Type& type); // can only be called on an empty list, otherwise throws exception // TODO
-			void resize(size_t newSize) override;
-			const Type& getType() const; // TODO
+			bool isConvertableTo(const Type& newFixType) const; // newFixType must be the new fix type, aka the type that is contained in the array, not the array type itself
+			bool convertTo(const Type& type);
+			bool convertTo(std::function<Type(const std::vector<ODF>&)> type, std::function<void(ODF& odf)> converter);
+			const Type& getType() const;
 
-			void enableFailRegistry(bool enable = true); // TODO
-			bool fail() const;
-			const std::vector<const ODF*>& getFails(); // TODO
-
-			void saveToMemory(MemoryDataStream& mem) const override;
 			void loadFromMemory(MemoryDataStream& mem) override;
 
 			struct InvalidTypeChange : public std::runtime_error
@@ -448,16 +519,6 @@ public:
 		class MixedArray : public AbstractArray
 		{
 		public:
-			struct FixInfo
-			{
-				bool tcmatch;
-				Type targetType;
-				TypeClass tc;
-			};
-			bool canBeFixed(FixInfo* info = nullptr) const;
-			FixedArray* tryFixing(FixInfo* info = nullptr); // returned structure is on the heap and needs to be deallocated. nullptr on error
-
-			void saveToMemory(MemoryDataStream& mem) const override;
 			void loadFromMemory(MemoryDataStream& mem) override;
 
 			MixedArray();
@@ -467,16 +528,15 @@ public:
 		std::variant<FixedArray, MixedArray> list;
 
 		// type functions
-		void clear();
+		void clear() override;
 		void clearAndFix(); // clear and make fixed
 		void clearAndFix(const Type& elementType); // clear and make fixed
 		void clearAndMix(); // clear and make mixed
-		void makeMixed() const override; // TODO
-		bool canBeFixed() const override; // TODO
-		bool tryFixing() const override; // TODO
+		void makeMixed() override; // TODO
+		Type canBeFixed() const override; // returns NULLTYPE if not fixable and UNDEFINED if empty
+		bool tryFixing() override; // TODO
 		bool isMixed() const override; // TODO
 		Type getFixedDatatype() const override; // called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
-		Type getTargetDatatype() const override; // TODO, called on mixed list, returns the datatype that every element would have if converted to fixed. THrows std::bad_variant_access if called on fixed
 
 		// List functions
 		void push_back(const ODF& odf) override;
@@ -490,8 +550,6 @@ public:
 		ODF& operator[](size_t index) override;
 		const ODF& operator[](size_t index) const override;
 		std::vector<ODF>& getArrayContainer() override;
-
-		void insert(std::string key, ODF& odf) override;
 
 		FixedArray& fixed() const; // just forwards to get<FixedArray>()
 		MixedArray& mixed() const; // just forwards to get<MixedArray>()
@@ -570,7 +628,9 @@ public:
 	ODF& operator=(float val);
 	ODF& operator=(double val);
 	ODF& operator=(const std::string& str);
+	ODF& operator=(const char* str);
 	ODF& operator=(const std::wstring& wstr);
+	ODF& operator=(const wchar_t* wstr);
 	// array types
 	ODF& operator=(const List& arr);
 	ODF& operator=(const List::MixedArray& marr);
@@ -628,6 +688,7 @@ public:
 	friend std::ostream& operator<<(std::ostream& out, const Type& type);
 
 	// generic functions
+	ODF& immutable(); // makes the object type immutable and returns a reference to itself. Used in the implementation of access operators
 	bool isConvertableTo(const Type& other) const;
 	void convertTo(const Type& newType);
 	bool covertToIfConvertable(const Type& newType);
@@ -662,6 +723,20 @@ public:
 	bool erase_range_nothrow(size_t from, size_t to) noexcept;
 	bool insert_nothrow(size_t where, const ODF& odf) noexcept;
 	size_t find_nothrow(const ODF& odf) noexcept;
+
+	// object functions
+	using Pair = Object::Pair;
+	virtual void insert(const std::string& key, const ODF& odf);
+	virtual void insert(const Pair& value);
+	virtual void insert(const std::map<std::string, ODF>& map);
+	virtual void insert(const std::unordered_map<std::string, ODF>& umap);
+	virtual void insert(const std::vector<Pair>& pairs);
+	virtual void insert(const std::initializer_list<Pair>& pairs);
+	virtual void erase(const std::string& key);
+	virtual bool contains(const std::string& key) const;
+	virtual size_t count(const std::string& key) const;
+
+	// list and object functions
 	size_t size() const;
 	void clear();
 
@@ -694,8 +769,3 @@ private:
 
 
 #include "ODF.tpp"
-
-template<typename T>
-inline void ODF::List::FixedArray::convert(std::function<T(const ODF& odf)> converter)
-{
-}
