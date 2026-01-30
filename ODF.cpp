@@ -665,9 +665,14 @@ ODF::TypeSpecifier ODF::getTypeFromTC(TypeClass tc, unsigned char precision)
 	return TypeSpecifier();
 }
 
-ODF& ODF::operator[](size_t size)
+ODF& ODF::operator[](size_t index)
 {
-	return std::get<List>(content)[size];
+	return std::get<List>(content)[index];
+}
+
+ODF& ODF::operator[](const std::string& key)
+{
+	return std::get<Object>(content)[key];
 }
 
 ODF& ODF::operator=(const ODF& other)
@@ -759,7 +764,7 @@ ODF& ODF::operator=(const std::string& str)
 
 ODF& ODF::operator=(const char* str)
 {
-	*this = std::string(str);
+	return *this = std::string(str);
 }
 
 ODF& ODF::operator=(const std::wstring& wstr)
@@ -771,14 +776,7 @@ ODF& ODF::operator=(const std::wstring& wstr)
 
 ODF& ODF::operator=(const wchar_t* wstr)
 {
-	*this = std::wstring(wstr);
-}
-
-ODF& ODF::operator=(const Object& obj)
-{
-	type = obj.isMixed() ? TypeSpecifier::MXOBJ : TypeSpecifier::FXOBJ;
-	content = obj;
-	return *this;
+	return *this = std::wstring(wstr);
 }
 
 ODF& ODF::operator=(const List& arr)
@@ -810,6 +808,53 @@ ODF& ODF::operator=(const List::FixedArray& farr)
 	List dbg(farr);
 	content = dbg;
 	updateSize();
+	return *this;
+}
+
+ODF& ODF::operator=(const Object& obj)
+{
+	type = obj.isMixed() ? TypeSpecifier::MXOBJ : TypeSpecifier::FXOBJ;
+	content = obj;
+	return *this;
+}
+
+ODF& ODF::operator=(const Object::MixedObject& mobj)
+{
+	type = TypeSpecifier::MXOBJ;
+	MixedObjectSpecifier& mobjSpec = std::get<MixedObjectSpecifier>(std::get<ObjectSpecifier>(*type.complexSpec));
+	for (const Object::Pair& pair : const_cast<Object::MixedObject&>(mobj))
+		mobjSpec.properties[pair.first] = pair.second.type;
+	content.emplace<Object>() = mobj;
+	return *this;
+}
+
+ODF::Object& ODF::Object::operator=(const Object& other)
+{
+	if (&other == this)
+		return *this;
+	object = other.object;
+	return *this;
+}
+
+ODF::Object& ODF::Object::operator=(const Object::MixedObject& mobj)
+{
+	object.emplace<Object::MixedObject>() = mobj;
+	return *this;
+}
+
+ODF::Object& ODF::Object::operator=(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs)
+{
+	// copy the pairs into the current object, and skip all type marking objects (the ComplexExplicitor::OBJSTRUCT)
+	clear();
+	for (const std::variant<Pair, ComplexExplicitor::OBJSTRUCT>& it : pairs)
+		if (!it.index())
+			insert(std::get<Pair>(it));
+	return *this;
+}
+
+ODF::Object& ODF::Object::operator=(const Object::FixedObject& fobj)
+{
+	object.emplace<Object::FixedObject>() = fobj;
 	return *this;
 }
 
@@ -2022,7 +2067,7 @@ ODF::Status ODF::saveBody(MemoryDataStream& mem) const
 			return saveArray(mem);
 		}
 	}
-	catch (std::bad_variant_access& exp)
+	catch (std::bad_variant_access&)
 	{
 		return Status::TypeMismatch;
 	}
@@ -2287,14 +2332,65 @@ size_t ODF::find_nothrow(const ODF& odf) noexcept
 	}
 }
 
+void ODF::insert(const std::string& key, const ODF& odf)
+{
+	std::get<Object>(content).insert(key, odf);
+}
+
+void ODF::insert(const Pair& value)
+{
+	std::get<Object>(content).insert(value);
+}
+
+void ODF::insert(const std::map<std::string, ODF>& map)
+{
+	std::get<Object>(content).insert(map);
+}
+
+void ODF::insert(const std::unordered_map<std::string, ODF>& umap)
+{
+	std::get<Object>(content).insert(umap);
+}
+
+void ODF::insert(const std::vector<Pair>& pairs)
+{
+	std::get<Object>(content).insert(pairs);
+}
+
+void ODF::insert(const std::initializer_list<Pair>& pairs)
+{
+	std::get<Object>(content).insert(pairs);
+}
+
+void ODF::erase(const std::string& key)
+{
+	std::get<Object>(content).erase(key);
+}
+
+bool ODF::contains(const std::string& key) const
+{
+	return std::get<Object>(content).contains(key);
+}
+
+size_t ODF::count(const std::string& key) const
+{
+	return std::get<Object>(content).count(key);
+}
+
 size_t ODF::size() const
 {
-	return std::get<List>(content).size();
+	if (auto ptr = std::get_if<List>(&content))
+		return ptr->size();
+	else if (auto ptr = std::get_if<Object>(&content))
+		return ptr->size();
 }
 
 void ODF::clear()
 {
-	std::get<List>(content).clear();
+	if (auto ptr = std::get_if<List>(&content))
+		ptr->clear();
+	else if (auto ptr = std::get_if<Object>(&content))
+		ptr->clear();
 }
 
 void ODF::AbstractArray::push_front(const ODF& odf)
@@ -2344,6 +2440,16 @@ ODF& ODF::AbstractArray::operator[](size_t index)
 const ODF& ODF::AbstractArray::operator[](size_t index) const
 {
 	return list[index];
+}
+
+ODF& ODF::AbstractArray::at(size_t index)
+{
+	return list.at(index);
+}
+
+const ODF& ODF::AbstractArray::at(size_t index) const
+{
+	return list.at(index);
 }
 
 std::vector<ODF>& ODF::AbstractArray::getArrayContainer()
@@ -2479,6 +2585,7 @@ bool ODF::List::FixedArray::convertTo(const Type& type)
 	fixType = type;
 	for (ODF& odf : list)
 		odf.convertTo(fixType);
+	return true;
 }
 
 bool ODF::List::FixedArray::convertTo(std::function<Type(const std::vector<ODF>&)> type, std::function<void(ODF& odf)> converter)
@@ -2486,6 +2593,7 @@ bool ODF::List::FixedArray::convertTo(std::function<Type(const std::vector<ODF>&
 	fixType = type(list);
 	for (ODF& odf : list)
 		converter(odf);
+	return true;
 }
 
 void ODF::List::FixedArray::resize(size_t newSize)
@@ -2580,6 +2688,30 @@ bool ODF::Object::isMixed() const
 ODF::Type ODF::Object::getFixedDatatype() const
 {
 	return std::get<FixedObject>(object).getType();
+}
+
+ODF::Object::Object()
+{
+}
+
+ODF::Object::Object(const Object& other) : Object()
+{
+	*this = other;
+}
+
+ODF::Object::Object(const Object::MixedObject& mobj) : Object()
+{
+	*this = mobj;
+}
+
+ODF::Object::Object(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs)
+{
+	*this = pairs;
+}
+
+ODF::Object::Object(const Object::FixedObject& fobj)
+{
+	*this = fobj;
 }
 
 void ODF::List::clear()
@@ -2777,6 +2909,16 @@ ODF& ODF::List::operator[](size_t index)
 const ODF& ODF::List::operator[](size_t index) const
 {
 	return std::visit([&](const AbstractArray& base) -> const ODF& { return base[index]; }, list);
+}
+
+ODF& ODF::List::at(size_t index)
+{
+	return std::visit([&](AbstractArray& aarr) -> ODF& { return aarr.at(index); }, list);
+}
+
+const ODF& ODF::List::at(size_t index) const
+{
+	return std::visit([&](const AbstractArray& aarr) -> const ODF& { return aarr.at(index); }, list);
 }
 
 std::vector<ODF>& ODF::List::getArrayContainer()
@@ -2981,9 +3123,34 @@ size_t ODF::AbstractObject::count(const std::string& key) const
 	return map.count(key);
 }
 
+size_t ODF::AbstractObject::size() const
+{
+	return map.size();
+}
+
 void ODF::AbstractObject::clear()
 {
 	map.clear();
+}
+
+ODF& ODF::at(size_t index)
+{
+	return std::get<List>(content).at(index);
+}
+
+const ODF& ODF::at(size_t index) const
+{
+	return std::get<List>(content).at(index);
+}
+
+ODF& ODF::at(const std::string& key)
+{
+	return std::get<Object>(content).at(key);
+}
+
+const ODF& ODF::at(const std::string& key) const
+{
+	return std::get<Object>(content).at(key);
 }
 
 ODF& ODF::AbstractObject::at(const std::string& key)
@@ -3155,6 +3322,7 @@ bool ODF::Object::FixedObject::convertTo(const Type& type)
 	fixType = type;
 	for (IteratorType& pair : map)
 		pair.second.convertTo(fixType);
+	return true;
 }
 
 bool ODF::Object::FixedObject::convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter)
@@ -3162,6 +3330,7 @@ bool ODF::Object::FixedObject::convertTo(std::function<Type(const std::map<std::
 	fixType = type(map);
 	for (IteratorType& pair : map)
 		converter(pair.second);
+	return true;
 }
 
 const ODF::Type& ODF::Object::FixedObject::getType() const
@@ -3235,14 +3404,14 @@ ODF& ODF::Object::operator[](const std::string& key)
 
 ODF& ODF::Object::at(const std::string& key)
 {
-	std::visit([&](AbstractObject& aobj) -> ODF& {
+	return std::visit([&](AbstractObject& aobj) -> ODF& {
 		return aobj.at(key);
 		}, object);
 }
 
 const ODF& ODF::Object::at(const std::string& key) const
 {
-	std::visit([&](const AbstractObject& aobj) -> const ODF& {
+	return std::visit([&](const AbstractObject& aobj) -> const ODF& {
 		return aobj.at(key);
 		}, object);
 }

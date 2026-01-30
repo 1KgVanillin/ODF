@@ -27,6 +27,11 @@ public:
 		static unsigned char DefaultIntegerMergeSize;
 	};
 	
+	struct ComplexExplicitor
+	{
+	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ComplexExplicitor; } __OBJ;
+	};
+
 	// generic development exception
 	struct SixSeven : public std::runtime_error
 	{
@@ -406,6 +411,13 @@ public:
 				for (const std::pair<std::string, T>& it : pairs)
 					insert(it);
 			}
+			template<typename T>
+			FixedObject(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& pairs)
+			{
+				for (const std::variant<std::pair<std::string, T>, ComplexExplicitor>& it : pairs)
+					if (!it.index())
+						insert(it);
+			}
 		};
 
 		class MixedObject : public AbstractObject
@@ -442,6 +454,22 @@ public:
 		bool tryFixing() override; // returns NULLTYPE if not fixable and UNDEFINED if empty
 		bool isMixed() const override; // TODO
 		Type getFixedDatatype() const override; // called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
+	
+		Object& operator=(const Object& other);
+		Object& operator=(const Object::MixedObject& mobj);
+		Object& operator=(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
+		Object& operator=(const Object::FixedObject& fobj);
+		template<typename T> Object& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& pairs) {
+			object.emplace<FixedObject>() = FixedObject(pairs);
+			return *this;
+		} // templated sigma rizz
+	
+		Object();
+		Object(const Object& other);
+		Object(const Object::MixedObject& mobj);
+		Object(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
+		Object(const Object::FixedObject& fobj);
+		template<typename T> Object(ComplexExplicitor::OBJSTRUCT, const std::initializer_list<std::pair<std::string, T>>& pairs) { *this = FixedObject(pairs); }
 	};
 
 
@@ -466,6 +494,8 @@ public:
 
 		virtual ODF& operator[](size_t index);
 		virtual const ODF& operator[](size_t index) const;
+		virtual ODF& at(size_t index);
+		virtual const ODF& at(size_t index) const;
 
 		virtual ODF* begin() const noexcept;
 		virtual ODF* end() const noexcept;
@@ -502,13 +532,13 @@ public:
 
 			FixedArray();
 			template<typename T>
-			FixedArray(const std::initializer_list<T>& initializer_list) : fails(nullptr)
+			FixedArray(const std::initializer_list<T>& initializer_list)
 			{
 				for (const T& t : initializer_list)
 					push_back(t);
 			}
 			template<typename T>
-			FixedArray(const std::vector<T>& vector) : fails(nullptr)
+			FixedArray(const std::vector<T>& vector)
 			{
 				for (const T& t : vector)
 					push_back(t);
@@ -549,6 +579,8 @@ public:
 		size_t size() const override;
 		ODF& operator[](size_t index) override;
 		const ODF& operator[](size_t index) const override;
+		ODF& at(size_t index) override;
+		const ODF& at(size_t index) const override;
 		std::vector<ODF>& getArrayContainer() override;
 
 		FixedArray& fixed() const; // just forwards to get<FixedArray>()
@@ -572,8 +604,8 @@ public:
 		List(const MixedArray& marr);
 		List(const std::initializer_list<ODF>& initializer_list);
 		List(const FixedArray& farr);
-		template<typename T> List(const std::initializer_list<T>& initializer_list) : List(FixedArray(initializer_list)) {}
-		template<typename T> List(const std::vector<T>& vector) : List(FixedArray(vector)) {}
+		template<typename T> List(const std::initializer_list<T>& initializer_list) : FixedArray(initializer_list) {}
+		template<typename T> List(const std::vector<T>& vector) : FixedArray(vector) {}
 	};
 		
 
@@ -611,8 +643,6 @@ public:
 	static VariantType getVariantTypeFromTemplate() {}; // TODO
 
 	// Interface
-	// access operators
-	ODF& operator[](size_t index);
 
 	// operator=
 	ODF& operator=(const ODF& other); // copy
@@ -636,9 +666,13 @@ public:
 	ODF& operator=(const List::MixedArray& marr);
 	ODF& operator=(const std::initializer_list<ODF>& initializer_list);
 	ODF& operator=(const List::FixedArray& farr);
-	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = List::FixedArray(initializer_list); }
-	// object types
 	ODF& operator=(const Object& obj);
+	ODF& operator=(const Object::MixedObject& mobj);
+	ODF& operator=(const std::initializer_list<std::pair<std::string, ODF>>& initializer_list);
+	ODF& operator=(const Object::FixedObject& farr);
+	template<typename T> ODF& operator=(const std::initializer_list<std::pair<std::string, T>>& initializer_list) { *this = Object::FixedObject(initializer_list); }
+	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = List::FixedArray(initializer_list); }
+	
 	operator INT_8();
 	operator UINT_8();
 	operator INT_16();
@@ -676,6 +710,25 @@ public:
 	ODF(const List::FixedArray& farr);
 	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(List::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
 	template<typename T> ODF(const std::vector<T>& vector) : ODF(List::FixedArray(vector)) {}
+	template<typename T> ODF(const std::initializer_list<std::pair<std::string, T>>& initializer_list) : ODF(Object::FixedObject()) {}
+	template<typename T>
+	ODF(const std::map<std::string, T>& map)
+	{
+		for (const std::pair<std::string, T>& it : map)
+			insert(it);
+	}
+	template<typename T>
+	ODF(const std::unordered_map<std::string, T>& umap)
+	{
+		for (const std::pair<std::string, T>& it : umap)
+			insert(it);
+	}
+	template<typename T>
+	ODF(const std::vector<std::pair<std::string, T>>& pairs)
+	{
+		for (const std::pair<std::string, T>& it : pairs)
+			insert(it);
+	}
 
 	// ostream printing
 	// print flags
@@ -740,6 +793,53 @@ public:
 	size_t size() const;
 	void clear();
 
+	// access operators
+	ODF& at(size_t index); // throws bad_variant_access if called on not an array
+	const ODF& at(size_t index) const; // throws bad_variant_access if called on not an array
+	ODF& at(const std::string& key); // throws bad_variant_access if called on a object
+	const ODF& at(const std::string& key) const; // throws bad_variant_access if called on a object
+	ODF& operator[](size_t index); // throws bad_variant_access if called on not an array
+	ODF& operator[](const std::string& key); // throws bad_variant_access if called on a object
+
+	// visitors (replacement for Iterators for now, and for advanced or accelerated processing directly in the object)
+	template<typename Func> void visit(Func&& functor)
+	{
+		std::visit([&](auto& container) {
+			using decaytype = std::decay_t<decltype(container)>;
+
+			if constexpr (std::is_same_v<decaytype, List>)
+			{
+				List& list = std::get<List>(content);
+				for (ODF& odf : list)
+					functor(odf);
+			}
+			else if constexpr (std::is_same_v<decaytype, List::FixedArray> || std::is_same_v<decaytype, List::MixedArray>)
+			{
+				decaytype& list = std::get<decaytype>(std::get<List>(content).list);
+				for (ODF& odf : list)
+					functor(odf);
+			}
+			else if constexpr (std::is_same_v<decaytype, Object>)
+			{
+				Object& obj = std::get<Object>(content);
+				for (Pair& pair : obj)
+					functor(pair);
+			}
+			else if constexpr (std::is_same_v<decaytype, Object::FixedObject> || std::is_same_v<decaytype, Object::MixedObject>)
+			{
+				decaytype& obj = std::get<decaytype>(std::get<Object>(content).object);
+				for (Pair& pair : obj)
+					functor(pair);
+			}
+			else
+			{
+				std::visit([](const ODF& odf) {
+					functor(odf);
+				}, content);
+			}
+		}, content);
+	}
+
 	// Operators
 	friend bool operator== (const ODF& odf1, const ODF& odf2); // TODO
 
@@ -765,7 +865,7 @@ private:
 	Status loadBody(MemoryDataStream& mem);
 	Status loadObject(MemoryDataStream& mem);
 	Status loadArray(MemoryDataStream& mem);
+
+public:
+	// predefined Types:
 };
-
-
-#include "ODF.tpp"

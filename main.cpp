@@ -25,8 +25,8 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 }
 
 // TODO
-// implement function forwarding for Object Types
 // implement conversion mechanics for complex types
+// construcot and operator= forwarding for Object
 
 // planned features
 // typedef support
@@ -42,7 +42,10 @@ int main()
 	// odf = map / unordered_map
 	
 	try {
-		ODF odf;
+		ODF odf = {
+			{"", 5},
+			{"", 5}
+		};
 
 		odf.makeList(ODF::Type(ODF::TypeSpecifier::UINT));
 
