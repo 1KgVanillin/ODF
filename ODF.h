@@ -15,6 +15,16 @@
 #include <functional>
 #include <optional>
 
+#define ODF_THREADSAFE
+#ifdef ODF_THREADSAFE
+#include <mutex>
+#define ODF_THREADSAFE_PRINT std::lock_guard<std::mutex> threadsafe_print_guard(ODF::printMutex)
+#else
+#define ODF_THREADSAFE_PRINT
+#endif
+#define ODF_DISABLE_TYPE_PRINT bool odf_print_type_backup = ODF::printType; ODF::printType = false;
+#define ODF_RESTORE_TYPE_PRINT ODF::printType = odf_print_type_backup
+
 
 class DF_API ODF // optimized object format
 {
@@ -29,7 +39,7 @@ public:
 	
 	struct ComplexExplicitor
 	{
-	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ComplexExplicitor; } __OBJ;
+	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ODF; } __OBJ;
 	};
 
 	// generic development exception
@@ -329,44 +339,46 @@ public:
 		virtual Type getFixedDatatype() const = 0;
 	};
 
-	class AbstractObject : public AbstractDataObject
+	class AbstractObject
 	{
-		protected:
-		std::map<std::string, ODF> map;
 	public:
-		typedef std::pair<std::string, ODF> Pair;
+		typedef std::pair<const std::string, ODF> Pair;
 		typedef std::map<std::string, ODF>::const_iterator ConstIterator;
+		typedef std::map<std::string, ODF>::iterator Iterator;
 		typedef std::map<std::string, ODF>::const_iterator::value_type IteratorType;
-		virtual void insert(const std::string& key, const ODF& odf);
-		virtual void insert(const Pair& value);
-		virtual void insert(const std::map<std::string, ODF>& map);
-		virtual void insert(const std::unordered_map<std::string, ODF>& umap);
-		virtual void insert(const std::vector<Pair>& pairs);
-		virtual void insert(const std::initializer_list<Pair>& pairs);
-		virtual void erase(const std::string& key);
-		virtual bool contains(const std::string& key) const;
-		virtual size_t count(const std::string& key) const;
-		virtual size_t size() const;
-		virtual void clear();
 
-		virtual ODF& at(const std::string& key);
-		virtual const ODF& at(const std::string& key) const;
-		virtual ODF& operator[](const std::string& key);
+		virtual void insert(const std::string& key, const ODF& odf) = 0;
+		virtual void insert(const Pair& value) = 0;
+		virtual void insert(const std::map<std::string, ODF>& map) = 0;
+		virtual void insert(const std::unordered_map<std::string, ODF>& umap) = 0;
+		virtual void insert(const std::vector<Pair>& pairs) = 0;
+		virtual void insert(const std::initializer_list<Pair>& pairs) = 0;
+		virtual void erase(const std::string& key) = 0;
 
-		virtual ConstIterator begin() const noexcept;
-		virtual ConstIterator end() const noexcept;
-		virtual std::map<std::string, ODF>& getObjectContainer();
+		virtual bool contains(const std::string& key) const = 0;
+		virtual size_t count(const std::string& key) const = 0;
+		virtual size_t size() const = 0;
+		virtual void clear() = 0;
 
-		void saveToMemory(MemoryDataStream& mem) const override; // is the same for both mixed and fixed objects
+		virtual ODF& operator[](const std::string& key) = 0;
+		virtual ODF& at(const std::string& key) = 0;
+		virtual const ODF& at(const std::string& key) const = 0;
+
+		virtual ConstIterator begin() const noexcept = 0;
+		virtual Iterator begin() noexcept = 0;
+		virtual ConstIterator end() const noexcept = 0;
+		virtual Iterator end() noexcept = 0;
+		virtual std::map<std::string, ODF>& getObjectContainer() = 0;
 	};
 
 	// The just like with the Array, the AbstractObject is an implementation of the MixedAObject. The MixedObject inherits all functions from it and adds loadFromMemory
 	// The FIxedObject inherits the functions of the AbstractObjects, adds a loadFromMemory and overwrites all isnertion and access functions to perform type checks
-	class Object : public AbstractComplexDataObject, public AbstractObject
+	class Object :  public AbstractObject, public AbstractComplexDataObject, public AbstractDataObject
 	{
 	public:
-		class FixedObject : public AbstractObject
+		class FixedObject : public AbstractObject, public AbstractDataObject
 		{
+			std::map<std::string, ODF> map;
 			Type fixType;
 		public:
 			void insert(const std::string& key, const ODF& odf) override;
@@ -375,15 +387,29 @@ public:
 			void insert(const std::unordered_map<std::string, ODF>& umap) override;
 			void insert(const std::vector<Pair>& pairs) override;
 			void insert(const std::initializer_list<Pair>& pairs) override;
+			virtual void erase(const std::string& key) override;
+
+			bool contains(const std::string& key) const override;
+			size_t count(const std::string& key) const override;
+			size_t size() const override;
+			void clear() override;
+
 			ODF& operator[](const std::string& key) override; // also overwritten by FixedObject, as it could insert elements
 			ODF& at(const std::string& key) override;
 			const ODF& at(const std::string& key) const override;
+
+			ConstIterator begin() const noexcept override;
+			Iterator begin() noexcept override;
+			ConstIterator end() const noexcept override;
+			Iterator end() noexcept override;
+			std::map<std::string, ODF>& getObjectContainer() override;
 
 			void setType(const Type& type); bool isConvertableTo(const Type& newFixType) const; // newFixType must be the new fix type, aka the type that is contained in the array, not the array type itself
 			bool convertTo(const Type& type);
 			bool convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter);
 			const Type& getType() const; // returns the type of the elements contained in the object
 
+			void saveToMemory(MemoryDataStream& mem) const override;
 			void loadFromMemory(MemoryDataStream& mem) override; // only the fixtype must be set exterally
 
 			FixedObject();
@@ -418,15 +444,44 @@ public:
 					if (!it.index())
 						insert(it);
 			}
+
+			friend class ODF::Object;
 		};
 
-		class MixedObject : public AbstractObject
+		class MixedObject : public AbstractObject, public AbstractDataObject
 		{
+			std::map<std::string, ODF> map;
 		public:
+			void insert(const std::string& key, const ODF& odf) override;
+			void insert(const Pair& value) override;
+			void insert(const std::map<std::string, ODF>& map) override;
+			void insert(const std::unordered_map<std::string, ODF>& umap) override;
+			void insert(const std::vector<Pair>& pairs) override;
+			void insert(const std::initializer_list<Pair>& pairs) override;
+			void erase(const std::string& key) override;
+
+			bool contains(const std::string& key) const override;
+			size_t count(const std::string& key) const override;
+			size_t size() const override;
+			void clear() override;
+
+			ODF& operator[](const std::string& key) override;
+			ODF& at(const std::string& key) override;
+			const ODF& at(const std::string& key) const override;
+
+			ConstIterator begin() const noexcept override;
+			Iterator begin() noexcept override;
+			ConstIterator end() const noexcept override;
+			Iterator end() noexcept override;
+			std::map<std::string, ODF>& getObjectContainer() override;
+
+			void saveToMemory(MemoryDataStream& mem) const override;
 			void loadFromMemory(MemoryDataStream& mem) override; // every type must be set externally
 
 			MixedObject();
 			MixedObject(const std::initializer_list<Pair>& elements);
+
+			friend class ODF::Object;
 		};
 		
 		std::variant<FixedObject, MixedObject> object;
@@ -437,9 +492,28 @@ public:
 		void insert(const std::unordered_map<std::string, ODF>& umap) override;
 		void insert(const std::vector<Pair>& pairs) override;
 		void insert(const std::initializer_list<Pair>& pairs) override;
+		virtual void erase(const std::string& key);
+
+		bool contains(const std::string& key) const override;
+		size_t count(const std::string& key) const override;
+		size_t size() const override;
+		void clear() override;
+
+		ConstIterator begin() const noexcept override;
+		Iterator begin() noexcept override;
+		ConstIterator end() const noexcept override;
+		Iterator end() noexcept override;
+		std::map<std::string, ODF>& getObjectContainer() override;
+
 		ODF& operator[](const std::string& key) override; // also overwritten by FixedObject, as it could insert elements
 		ODF& at(const std::string& key) override;
 		const ODF& at(const std::string& key) const override;
+
+		ConstIterator begin() const noexcept override;
+		Iterator begin() noexcept override;
+		ConstIterator end() const noexcept override;
+		Iterator end() noexcept override;
+		std::map<std::string, ODF>& getObjectContainer() override;
 
 		void loadFromMemory(MemoryDataStream& mem) override; // only the fixtype must be set exterally
 		void saveToMemory(MemoryDataStream& mem) const override;
@@ -455,6 +529,9 @@ public:
 		bool isMixed() const override; // TODO
 		Type getFixedDatatype() const override; // called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
 	
+		FixedObject& fixed();
+		MixedObject& mixed();
+
 		Object& operator=(const Object& other);
 		Object& operator=(const Object::MixedObject& mobj);
 		Object& operator=(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
@@ -476,53 +553,76 @@ public:
 	// The AbstractArray is an implementation of the mixed array.
 	// The mixedArray inherits everything from it.
 	// The FixedArray inherits erase, etc. and overwrites the push and insert functions to make a fixed check
-	class AbstractArray : public AbstractDataObject
+	class AbstractArray
 	{
-	protected:
-		std::vector<ODF> list;
 	public:
-		virtual void push_back(const ODF& odf);
-		virtual void push_front(const ODF& odf);
-		virtual void erase(size_t index);
-		virtual void erase(size_t index, size_t numberOfElements);
-		virtual void erase_range(size_t from, size_t to);
-		virtual void insert(size_t where, const ODF& odf);
-		virtual size_t find(const ODF& odf);
-		virtual size_t size() const;
-		virtual void clear();
-		virtual void resize(size_t newSize);
+		typedef std::vector<ODF>::const_iterator ConstIterator;
+		typedef std::vector<ODF>::iterator Iterator;
+		typedef std::vector<ODF>::const_iterator::value_type IteratorType;
 
-		virtual ODF& operator[](size_t index);
-		virtual const ODF& operator[](size_t index) const;
-		virtual ODF& at(size_t index);
-		virtual const ODF& at(size_t index) const;
+		virtual void push_back(const ODF& odf) = 0;
+		virtual void push_front(const ODF& odf) = 0;
+		virtual void erase(size_t index) = 0;
+		virtual void erase(size_t index, size_t numberOfElements) = 0;
+		virtual void erase_range(size_t from, size_t to) = 0;
+		virtual void insert(size_t where, const ODF& odf) = 0;
 
-		virtual ODF* begin() const noexcept;
-		virtual ODF* end() const noexcept;
-		virtual std::vector<ODF>& getArrayContainer();
+		virtual std::optional<size_t> find(const ODF& odf) const = 0;
+		virtual size_t size() const = 0;
+		virtual void clear() = 0;
+		virtual void resize(size_t newSize) = 0;
 
-		void saveToMemory(MemoryDataStream& mem) const override; // is the same for both fixed and mixed arrays.
+		virtual ODF& operator[](size_t index) = 0;
+		virtual const ODF& operator[](size_t index) const = 0;
+		virtual ODF& at(size_t index) = 0;
+		virtual const ODF& at(size_t index) const = 0;
+
+		virtual ConstIterator begin() const noexcept = 0;
+		virtual Iterator begin() noexcept = 0;
+		virtual ConstIterator end() const noexcept = 0;
+		virtual Iterator end() noexcept = 0;
+		virtual std::vector<ODF>& getArrayContainer() = 0;
 	};
 	
-	class List : public AbstractComplexDataObject, public AbstractArray
+	class List : public AbstractComplexDataObject, public AbstractArray, AbstractDataObject
 	{
 	public:
-		class FixedArray : public AbstractArray
+		class FixedArray : public AbstractArray, public AbstractDataObject
 		{
+			std::vector<ODF> list;
 			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
 		public:
 			void push_back(const ODF& odf) override;
 			void push_front(const ODF& odf) override;
+			void erase(size_t index) override;
+			void erase(size_t index, size_t numberOfElements) override;
+			void erase_range(size_t from, size_t to) override;
 			void insert(size_t where, const ODF& odf) override;
-			void updateSize(Type& size) const;
+
+			std::optional<size_t> find(const ODF& odf) const override;
+			size_t size() const override;
+			void clear() override;
 			void resize(size_t newSize) override;
 
+			ODF& operator[](size_t index) override;
+			const ODF& operator[](size_t index) const override;
+			ODF& at(size_t index) override;
+			const ODF& at(size_t index) const override;
+
+			ConstIterator begin() const noexcept override;
+			Iterator begin() noexcept override;
+			ConstIterator end() const noexcept override;
+			Iterator end() noexcept override;
+			std::vector<ODF>& getArrayContainer() override;
+
+			void updateSize(ODF::Type& type) const;
 			void setType(const Type& type); // can only be called on an empty list, otherwise throws exception // TODO
 			bool isConvertableTo(const Type& newFixType) const; // newFixType must be the new fix type, aka the type that is contained in the array, not the array type itself
 			bool convertTo(const Type& type);
 			bool convertTo(std::function<Type(const std::vector<ODF>&)> type, std::function<void(ODF& odf)> converter);
 			const Type& getType() const;
 
+			void saveToMemory(MemoryDataStream& mem) const override;
 			void loadFromMemory(MemoryDataStream& mem) override;
 
 			struct InvalidTypeChange : public std::runtime_error
@@ -546,9 +646,34 @@ public:
 		};
 
 		// inherits all vector functions from AbstractArray
-		class MixedArray : public AbstractArray
+		class MixedArray : public AbstractArray, public AbstractDataObject
 		{
+			std::vector<ODF> list;
 		public:
+			void push_back(const ODF& odf) override;
+			void push_front(const ODF& odf) override;
+			void erase(size_t index) override;
+			void erase(size_t index, size_t numberOfElements) override;
+			void erase_range(size_t from, size_t to) override;
+			void insert(size_t where, const ODF& odf) override;
+
+			std::optional<size_t> find(const ODF& odf) const override;
+			size_t size() const override;
+			void clear() override;
+			void resize(size_t newSize) override;
+
+			ODF& operator[](size_t index) override;
+			const ODF& operator[](size_t index) const override;
+			ODF& at(size_t index) override;
+			const ODF& at(size_t index) const override;
+
+			ConstIterator begin() const noexcept override;
+			Iterator begin() noexcept override;
+			ConstIterator end() const noexcept override;
+			Iterator end() noexcept override;
+			std::vector<ODF>& getArrayContainer() override;
+
+			void saveToMemory(MemoryDataStream& mem) const override;
 			void loadFromMemory(MemoryDataStream& mem) override;
 
 			MixedArray();
@@ -556,6 +681,29 @@ public:
 		};
 
 		std::variant<FixedArray, MixedArray> list;
+
+		void push_back(const ODF& odf) override;
+		void push_front(const ODF& odf) override;
+		void erase(size_t index) override;
+		void erase(size_t index, size_t numberOfElements) override;
+		void erase_range(size_t from, size_t to) override;
+		void insert(size_t where, const ODF& odf) override;
+
+		std::optional<size_t> find(const ODF& odf) const override;
+		size_t size() const override;
+		void clear() override;
+		void resize(size_t newSize) override;
+
+		ODF& operator[](size_t index) override;
+		const ODF& operator[](size_t index) const override;
+		ODF& at(size_t index) override;
+		const ODF& at(size_t index) const override;
+
+		ConstIterator begin() const noexcept override;
+		Iterator begin() noexcept override;
+		ConstIterator end() const noexcept override;
+		Iterator end() noexcept override;
+		std::vector<ODF>& getArrayContainer() override;
 
 		// type functions
 		void clear() override;
@@ -567,21 +715,6 @@ public:
 		bool tryFixing() override; // TODO
 		bool isMixed() const override; // TODO
 		Type getFixedDatatype() const override; // called on fixed list, returns the actual datatype that every element has. Throws std::bad_variant_access if called on mixed
-
-		// List functions
-		void push_back(const ODF& odf) override;
-		void push_front(const ODF& odf) override;
-		void erase(size_t index) override;
-		void erase(size_t index, size_t numberOfElements) override;
-		void erase_range(size_t from, size_t to) override;
-		void insert(size_t where, const ODF& odf) override;
-		size_t find(const ODF& odf) override;
-		size_t size() const override;
-		ODF& operator[](size_t index) override;
-		const ODF& operator[](size_t index) const override;
-		ODF& at(size_t index) override;
-		const ODF& at(size_t index) const override;
-		std::vector<ODF>& getArrayContainer() override;
 
 		FixedArray& fixed() const; // just forwards to get<FixedArray>()
 		MixedArray& mixed() const; // just forwards to get<MixedArray>()
@@ -668,9 +801,9 @@ public:
 	ODF& operator=(const List::FixedArray& farr);
 	ODF& operator=(const Object& obj);
 	ODF& operator=(const Object::MixedObject& mobj);
-	ODF& operator=(const std::initializer_list<std::pair<std::string, ODF>>& initializer_list);
-	ODF& operator=(const Object::FixedObject& farr);
-	template<typename T> ODF& operator=(const std::initializer_list<std::pair<std::string, T>>& initializer_list) { *this = Object::FixedObject(initializer_list); }
+	ODF& operator=(const std::initializer_list<std::variant<Object::Pair, ComplexExplicitor::OBJSTRUCT>>& initializer_list);
+	ODF& operator=(const Object::FixedObject& fobj);
+	template<typename T> ODF& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& initializer_list) { *this = Object::FixedObject(initializer_list); }
 	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = List::FixedArray(initializer_list); }
 	
 	operator INT_8();
@@ -704,13 +837,17 @@ public:
 	ODF(const std::wstring& wstr);
 	ODF(const wchar_t* wstr);
 	ODF(const Object& obj);
+	ODF(const Object::MixedObject& mobj);
+	ODF(const std::initializer_list<std::variant<Object::Pair, ComplexExplicitor::OBJSTRUCT>>& initializer_list);
+	ODF(const Object::FixedObject& fobj);
+	
 	ODF(const List& arr);
 	ODF(const List::MixedArray& marr);
 	ODF(const std::initializer_list<ODF>& initializer_list);
 	ODF(const List::FixedArray& farr);
 	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(List::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
 	template<typename T> ODF(const std::vector<T>& vector) : ODF(List::FixedArray(vector)) {}
-	template<typename T> ODF(const std::initializer_list<std::pair<std::string, T>>& initializer_list) : ODF(Object::FixedObject()) {}
+	template<typename T> ODF(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& initializer_list) : ODF(Object::FixedObject(initializer_list)) {}
 	template<typename T>
 	ODF(const std::map<std::string, T>& map)
 	{
@@ -732,7 +869,12 @@ public:
 
 	// ostream printing
 	// print flags
-	bool printType;
+	static bool printType;
+#ifdef ODF_THREADSAFE
+	static std::mutex printMutex;
+#endif
+
+
 	// print operators
 	friend std::ostream& operator<<(std::ostream& out, const ODF& odf);
 	friend std::ostream& operator<<(std::ostream& out, const Object& obj);
@@ -768,14 +910,14 @@ public:
 	void erase(size_t index, size_t numberOfElements);
 	void erase_range(size_t from, size_t to);
 	void insert(size_t where, const ODF& odf);
-	size_t find(const ODF& odf);
+	std::optional<size_t> find(const ODF& odf);
 	bool push_back_nothrow(const ODF& odf) noexcept;
 	bool push_front_nothrow(const ODF& odf) noexcept;
 	bool erase_nothrow(size_t index) noexcept;
 	bool erase_nothrow(size_t index, size_t numberOfElements) noexcept;
 	bool erase_range_nothrow(size_t from, size_t to) noexcept;
 	bool insert_nothrow(size_t where, const ODF& odf) noexcept;
-	size_t find_nothrow(const ODF& odf) noexcept;
+	std::optional<size_t> find_nothrow(const ODF& odf) noexcept;
 
 	// object functions
 	using Pair = Object::Pair;
@@ -868,4 +1010,6 @@ private:
 
 public:
 	// predefined Types:
+
+	static ComplexExplicitor::OBJSTRUCT __OBJ;
 };

@@ -43,20 +43,20 @@ int main()
 	
 	try {
 		ODF odf = {
-			{"", 5},
-			{"", 5}
+			ODF::__OBJ,
+			ODF::Pair{"peins", 19},
+			ODF::Pair{"penis", 20}
 		};
 
-		odf.makeList(ODF::Type(ODF::TypeSpecifier::UINT));
+		ODF::List::FixedArray fobj;
+		ODF::List::MixedArray mobj;
 
-		odf.push_back(5ui32);
-		odf.push_back(6ui32);
-		odf.push_back(7);
+		//odf.push_back(5ui32); // Exception
+		//odf.push_back(6ui32);
+		//odf.push_back(7);
 
-		odf[1].convertTo(ODF::Type(ODF::TypeSpecifier::BYTE)); // illegal ?
-		odf[1] = "fisch"; // illegal ?
-
-		odf.push_back(5ui32);
+		//odf[1].convertTo(ODF::Type(ODF::TypeSpecifier::BYTE)); // illegal ?
+		//odf[1] = "fisch"; // illegal ?
 
 		cout << "start:\n" << odf << "\n";
 

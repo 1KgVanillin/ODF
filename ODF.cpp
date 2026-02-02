@@ -2,7 +2,12 @@
 
 bool ODF::Config::PreventAutomaticMergeLossFloat = true;
 bool ODF::Config::PreventAutomaticMergeLossString = true;
+bool ODF::printType = true;
+#ifdef ODF_THREADSAFE
+std::mutex ODF::printMutex;
+#endif
 unsigned char ODF::Config::DefaultIntegerMergeSize = 0;
+ODF::ComplexExplicitor::OBJSTRUCT ODF::__OBJ{};
 
 #pragma region specifiers
 void ODF::Type::makeImmutable()
@@ -305,6 +310,33 @@ std::ostream& operator<<(std::ostream& out, const ODF& odf)
 std::ostream& operator<<(std::ostream& out, const ODF::Object& obj)
 {
 	out << "[Object print not implemented]";
+	
+	if (obj.isMixed())
+	{
+		out << "<MX>\n";
+		for (const ODF::Pair& it : obj)
+			out << "[\"" << it.first << "\"]:\t" << it.second << "\n";
+	}
+	else
+	{
+		out << "<FX(" << obj.getFixedDatatype() << ")>\n";
+
+		ODF_THREADSAFE_PRINT;
+		ODF_DISABLE_TYPE_PRINT;
+
+		//
+		// TODO
+		// The error in the for loop below is that ODF::Object also inherits the AbstractObject::map, although it should only be present in the Fixed and Mixed Object Implemetatio.
+		// But with this error, the for loop iterates over the Object::map and not Object::AbstractObject map, which is empty because never accessed
+		//
+
+		for (const ODF::Pair& it : obj)
+		{
+			out << "[\"" << it.first << "\"]:\t" << it.second << "\n";
+		}
+
+		ODF_RESTORE_TYPE_PRINT;
+	}
 	return out;
 }
 
@@ -314,20 +346,21 @@ std::ostream& operator<<(std::ostream& out, const ODF::List& list)
 	{
 		out << "<MX>\n";
 		size_t i = 0;
-		for (const ODF& odf : const_cast<ODF::List&>(list).getArrayContainer()) // bruh
+		for (const ODF& odf : const_cast<ODF::List&>(list)) // bruh
 			out << i++ << ": " << odf << "\n";
 	}
 	else
 	{
 		out << "<FX(" << list.getFixedDatatype() << ")>\n";
 		size_t i = 0;
-		for (ODF& odf : const_cast<ODF::List&>(list).getArrayContainer()) // bruh
-		{
-			bool printType = odf.printType;
-			odf.printType = false;
+
+		ODF_THREADSAFE_PRINT;
+		ODF_DISABLE_TYPE_PRINT;
+
+		for (const ODF& odf : list) // bruh
 			out << i++ << ": " << odf << "\n";
-			odf.printType = printType;
-		}
+
+		ODF_RESTORE_TYPE_PRINT;
 	}
 
 	return out;
@@ -828,6 +861,20 @@ ODF& ODF::operator=(const Object::MixedObject& mobj)
 	return *this;
 }
 
+ODF& ODF::operator=(const std::initializer_list<std::variant<Object::Pair, ComplexExplicitor::OBJSTRUCT>>& initializer_list)
+{
+	return *this = Object(initializer_list);
+}
+
+ODF& ODF::operator=(const Object::FixedObject& fobj)
+{
+	type = TypeSpecifier::FXOBJ;
+	FixedObjectSpecifier& mobjSpec = std::get<FixedObjectSpecifier>(std::get<ObjectSpecifier>(*type.complexSpec));
+	mobjSpec.fixType = fobj.getType();
+	content.emplace<Object>() = fobj;
+	return *this;
+}
+
 ODF::Object& ODF::Object::operator=(const Object& other)
 {
 	if (&other == this)
@@ -928,9 +975,7 @@ ODF::operator List()
 	return std::get<List>(content);
 }
 
-ODF::ODF() : printType(true)
-{
-}
+ODF::ODF() {}
 
 ODF::ODF(const ODF& other)
 {
@@ -1010,6 +1055,21 @@ ODF::ODF(const wchar_t* wstr) : ODF()
 ODF::ODF(const Object& obj) : ODF()
 {
 	*this = obj;
+}
+
+ODF::ODF(const Object::MixedObject& mobj)
+{
+	*this = mobj;
+}
+
+ODF::ODF(const std::initializer_list<std::variant<Object::Pair, ComplexExplicitor::OBJSTRUCT>>& initializer_list)
+{
+	*this = initializer_list;
+}
+
+ODF::ODF(const Object::FixedObject& fobj)
+{
+	*this = fobj;
 }
 
 ODF::ODF(const List& arr) : ODF()
@@ -2197,11 +2257,6 @@ ODF::Status::Status(Value val)
 	content = val;
 }
 
-void ODF::AbstractArray::push_back(const ODF& odf)
-{
-	list.push_back(odf);
-}
-
 void ODF::push_back(const ODF& odf)
 {
 	std::get<List>(content).push_back(odf);
@@ -2244,7 +2299,7 @@ void ODF::insert(size_t where, const ODF& odf)
 		updateSize();
 }
 
-size_t ODF::find(const ODF& odf)
+std::optional<size_t> ODF::find(const ODF& odf)
 {
 	return std::get<List>(content).find(odf);
 }
@@ -2321,7 +2376,7 @@ bool ODF::insert_nothrow(size_t where, const ODF& odf) noexcept
 	}
 }
 
-size_t ODF::find_nothrow(const ODF& odf) noexcept
+std::optional<size_t> ODF::find_nothrow(const ODF& odf) noexcept
 {
 	try {
 		return find(odf);
@@ -2367,6 +2422,27 @@ void ODF::erase(const std::string& key)
 	std::get<Object>(content).erase(key);
 }
 
+bool ODF::Object::contains(const std::string& key) const
+{
+	return std::visit([&](const AbstractObject& aobj) -> bool {
+		return aobj.contains(key);
+		}, object);
+}
+
+size_t ODF::Object::count(const std::string& key) const
+{
+	return std::visit([&](const AbstractObject& aobj) -> size_t {
+		return aobj.count(key);
+		}, object);
+}
+
+size_t ODF::Object::size() const
+{
+	return std::visit([&](const AbstractObject& aobj) -> size_t {
+		return aobj.size();
+		}, object);
+}
+
 bool ODF::contains(const std::string& key) const
 {
 	return std::get<Object>(content).contains(key);
@@ -2391,97 +2467,6 @@ void ODF::clear()
 		ptr->clear();
 	else if (auto ptr = std::get_if<Object>(&content))
 		ptr->clear();
-}
-
-void ODF::AbstractArray::push_front(const ODF& odf)
-{
-	list.insert(list.begin(), odf);
-}
-
-void ODF::AbstractArray::erase(size_t index)
-{
-	list.erase(list.begin() + index);
-}
-
-void ODF::AbstractArray::erase(size_t index, size_t numberOfElements)
-{
-	list.erase(list.begin() + index, list.begin() + index + numberOfElements - 1);
-}
-
-void ODF::AbstractArray::erase_range(size_t from, size_t to)
-{
-	list.erase(list.begin() + from, list.begin() + to);
-}
-
-void ODF::AbstractArray::insert(size_t where, const ODF& odf)
-{
-	list.insert(list.begin() + where, odf);
-}
-
-size_t ODF::AbstractArray::find(const ODF& odf)
-{
-	// do a linear search
-	for (size_t i = 0; i < list.size(); i++)
-		if (list[i] == odf)
-			return i;
-	return -1; // corresponds to UINT64_MAX
-}
-
-size_t ODF::AbstractArray::size() const
-{
-	return list.size();
-}
-
-ODF& ODF::AbstractArray::operator[](size_t index)
-{
-	return list[index];
-}
-
-const ODF& ODF::AbstractArray::operator[](size_t index) const
-{
-	return list[index];
-}
-
-ODF& ODF::AbstractArray::at(size_t index)
-{
-	return list.at(index);
-}
-
-const ODF& ODF::AbstractArray::at(size_t index) const
-{
-	return list.at(index);
-}
-
-std::vector<ODF>& ODF::AbstractArray::getArrayContainer()
-{
-	return list;
-}
-
-void ODF::AbstractArray::saveToMemory(MemoryDataStream& mem) const
-{
-	// only the body is saved
-	for (const ODF& odf : list)
-		odf.saveBody(mem);
-}
-
-ODF* ODF::AbstractArray::begin() const noexcept
-{
-	return list.empty() ? nullptr : (ODF*)list.data();
-}
-
-ODF* ODF::AbstractArray::end() const noexcept
-{
-	return list.empty() ? nullptr : begin() + sizeof(ODF) * list.size();
-}
-
-void ODF::AbstractArray::clear()
-{
-	list.clear();
-}
-
-void ODF::AbstractArray::resize(size_t newSize)
-{
-	list.resize(newSize);
 }
 
 void ODF::List::FixedArray::push_back(const ODF& odf)
@@ -2528,6 +2513,23 @@ void ODF::List::FixedArray::push_front(const ODF& odf)
 	list[0].type.makeImmutable();
 }
 
+void ODF::List::FixedArray::erase(size_t index)
+{
+	list.erase(list.begin() + index);
+}
+
+void ODF::List::FixedArray::erase(size_t index, size_t numberOfElements)
+{
+	if (!numberOfElements)
+		return;
+	list.erase(list.begin() + index, list.begin() + index + numberOfElements - 1);
+}
+
+void ODF::List::FixedArray::erase_range(size_t from, size_t to)
+{
+	list.erase(list.begin() + from, list.begin() + to);
+}
+
 void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 {
 	// check type, then push_back, otherwise register fail
@@ -2550,7 +2552,23 @@ void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 	list[where + 1].type.makeImmutable(); // where is the index of the elemet before the new elememt
 }
 
-void ODF::List::FixedArray::updateSize(Type& type) const
+std::optional<size_t> ODF::List::FixedArray::find(const ODF& odf) const
+{
+	auto it = std::find(list.begin(), list.end(), odf);
+	return it == list.end() ? std::nullopt : std::make_optional(std::distance(list.begin(), it));
+}
+
+size_t ODF::List::FixedArray::size() const
+{
+	return list.size();
+}
+
+void ODF::List::FixedArray::clear()
+{
+	list.clear();
+}
+
+void ODF::List::FixedArray::updateSize(ODF::Type& type) const
 {
 	*type.sizeSpecifier() = list.size();
 	type.setSSS(type.sizeSpecifier()->sizeSpecifierSpecifier());
@@ -2603,9 +2621,60 @@ void ODF::List::FixedArray::resize(size_t newSize)
 		odf.type = fixType;
 }
 
+ODF& ODF::List::FixedArray::operator[](size_t index)
+{
+	return list[index];
+}
+
+const ODF& ODF::List::FixedArray::operator[](size_t index) const
+{
+	return list[index];
+}
+
+ODF& ODF::List::FixedArray::at(size_t index)
+{
+	return list.at(index);
+}
+
+const ODF& ODF::List::FixedArray::at(size_t index) const
+{
+	return list[index];
+}
+
+ODF::List::ConstIterator ODF::List::FixedArray::begin() const noexcept
+{
+	return list.begin();
+}
+
+ODF::List::Iterator ODF::List::FixedArray::begin() noexcept
+{
+	return list.begin();
+}
+
+ODF::List::ConstIterator ODF::List::FixedArray::end() const noexcept
+{
+	return list.end();
+}
+
+ODF::List::Iterator ODF::List::FixedArray::end() noexcept
+{
+	return list.end(),
+}
+
+std::vector<ODF>& ODF::List::FixedArray::getArrayContainer()
+{
+	return list;
+}
+
 inline const ODF::Type& ODF::List::FixedArray::getType() const
 {
 	return fixType;
+}
+
+void ODF::List::FixedArray::saveToMemory(MemoryDataStream& mem) const
+{
+	for (const IteratorType& it : list)
+		it.saveBody(mem);
 }
 
 void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem)
@@ -2620,6 +2689,12 @@ void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem)
 
 ODF::List::FixedArray::FixedArray()
 {
+}
+
+void ODF::List::MixedArray::saveToMemory(MemoryDataStream& mem) const
+{
+	for (const IteratorType& it : list)
+		it.saveBody(mem);
 }
 
 void ODF::List::MixedArray::loadFromMemory(MemoryDataStream& mem)
@@ -2690,6 +2765,16 @@ ODF::Type ODF::Object::getFixedDatatype() const
 	return std::get<FixedObject>(object).getType();
 }
 
+ODF::Object::FixedObject& ODF::Object::fixed()
+{
+	return std::get<FixedObject>(object);
+}
+
+ODF::Object::MixedObject& ODF::Object::mixed()
+{
+	return std::get<MixedObject>(object);
+}
+
 ODF::Object::Object()
 {
 }
@@ -2721,16 +2806,23 @@ void ODF::List::clear()
 		}, list);
 }
 
+void ODF::List::resize(size_t newSize)
+{
+	std::visit([&](AbstractArray& aarr) {
+		aarr.resize(newSize);
+		}, list);
+}
+
 void ODF::Object::loadFromMemory(MemoryDataStream& mem)
 {
-	std::visit([&mem](AbstractObject& aobj) {
+	std::visit([&mem](AbstractDataObject& aobj) {
 		aobj.loadFromMemory(mem);
 		}, object);
 }
 
 void ODF::Object::saveToMemory(MemoryDataStream& mem) const
 {
-	std::visit([&mem](const AbstractObject& aobj) {
+	std::visit([&mem](const AbstractDataObject& aobj) {
 		aobj.saveToMemory(mem);
 		}, object);
 }
@@ -2740,6 +2832,42 @@ void ODF::Object::clear()
 	std::visit([&](AbstractObject& aobj) {
 		aobj.clear();
 		}, object);
+}
+
+ODF::Object::ConstIterator ODF::Object::begin() const noexcept
+{
+	return std::visit([&](const AbstractObject& aobj) -> ConstIterator {
+		return aobj.begin();
+		}, object);
+}
+
+ODF::Object::Iterator ODF::Object::begin() noexcept
+{
+	return std::visit([&](AbstractObject& aobj) -> Iterator {
+		return aobj.begin();
+		}, object);
+}
+
+ODF::Object::ConstIterator ODF::Object::end() const noexcept
+{
+	return std::visit([&](const AbstractObject& aobj) -> ConstIterator {
+		return aobj.end();
+		}, object);
+}
+
+ODF::Object::Iterator ODF::Object::end() noexcept
+{
+	return std::visit([&](AbstractObject& aobj) -> Iterator {
+		return aobj.end();
+		}, object);
+}
+
+std::map<std::string, ODF>& ODF::Object::getObjectContainer()
+{
+	if (auto ptr = std::get_if<FixedObject>(&object))
+		return ptr->map;
+	else
+		return std::get<MixedObject>(object).map;
 }
 
 void ODF::Object::clearAndFix()
@@ -2894,6 +3022,13 @@ size_t ODF::List::find(const ODF& odf)
 		}, list);
 }
 
+std::optional<size_t> ODF::List::find(const ODF& odf) const
+{
+	std::visit([&](const AbstractArray& aarr) -> std::optional<size_t> {
+		return aarr.find(odf);
+		}, list);
+}
+
 size_t ODF::List::size() const
 {
 	return std::visit([](const ODF::AbstractArray& base) {
@@ -2921,6 +3056,34 @@ const ODF& ODF::List::at(size_t index) const
 	return std::visit([&](const AbstractArray& aarr) -> const ODF& { return aarr.at(index); }, list);
 }
 
+ODF::List::ConstIterator ODF::List::begin() const noexcept
+{
+	std::visit([](const AbstractArray& aarr) -> ODF::List::ConstIterator {
+		return aarr.begin();
+		}, list);
+}
+
+ODF::List::Iterator ODF::List::begin() noexcept
+{
+	std::visit([](AbstractArray& aarr) -> ODF::List::Iterator {
+		return aarr.begin();
+		}, list);
+}
+
+ODF::List::ConstIterator ODF::List::end() const noexcept
+{
+	std::visit([](const AbstractArray& aarr) -> ODF::List::ConstIterator {
+		return aarr.end();
+		}, list);
+}
+
+ODF::List::Iterator ODF::List::end() noexcept
+{
+	std::visit([](AbstractArray& aarr) -> ODF::List::Iterator {
+		return aarr.end();
+		}, list);
+}
+
 std::vector<ODF>& ODF::List::getArrayContainer()
 {
 	if (auto ptr = std::get_if<MixedArray>(&list))
@@ -2928,7 +3091,9 @@ std::vector<ODF>& ODF::List::getArrayContainer()
 	else if (auto ptr = std::get_if<FixedArray>(&list))
 		return ptr->getArrayContainer();
 	else
-		return *(std::vector<ODF>*)nullptr; // should never be reached. Fuck this.
+	{
+		THROW InvalidCondition();
+	}
 }
 
 ODF::List::FixedArray& ODF::List::fixed() const
@@ -3074,65 +3239,6 @@ ODF::InvalidType::InvalidType(const std::string& message) : std::runtime_error(m
 
 ODF::InvalidConversion::InvalidConversion(const std::string& message) : std::runtime_error(message) {}
 
-void ODF::AbstractObject::insert(const std::string& key, const ODF& odf)
-{
-	map.insert(std::make_pair(key, odf));
-}
-
-void ODF::AbstractObject::insert(const Pair& value)
-{
-	map.insert(value);
-}
-
-void ODF::AbstractObject::insert(const std::map<std::string, ODF>& map)
-{
-	for (const Pair& it : map)
-		insert(it);
-}
-
-void ODF::AbstractObject::insert(const std::unordered_map<std::string, ODF>& umap)
-{
-	for (const Pair& it : map)
-		insert(it);
-}
-
-void ODF::AbstractObject::insert(const std::vector<Pair>& pairs)
-{
-	for (const Pair& it : pairs)
-		insert(it);
-}
-
-void ODF::AbstractObject::insert(const std::initializer_list<Pair>& pairs)
-{
-	for (const Pair& it : pairs)
-		insert(it);
-}
-
-void ODF::AbstractObject::erase(const std::string& key)
-{
-	map.erase(key);
-}
-
-bool ODF::AbstractObject::contains(const std::string& key) const
-{
-	return map.contains(key);
-}
-
-size_t ODF::AbstractObject::count(const std::string& key) const
-{
-	return map.count(key);
-}
-
-size_t ODF::AbstractObject::size() const
-{
-	return map.size();
-}
-
-void ODF::AbstractObject::clear()
-{
-	map.clear();
-}
-
 ODF& ODF::at(size_t index)
 {
 	return std::get<List>(content).at(index);
@@ -3153,39 +3259,9 @@ const ODF& ODF::at(const std::string& key) const
 	return std::get<Object>(content).at(key);
 }
 
-ODF& ODF::AbstractObject::at(const std::string& key)
+void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem) const
 {
-	return map.at(key);
-}
-
-const ODF& ODF::AbstractObject::at(const std::string& key) const
-{
-	return map.at(key);
-}
-
-ODF& ODF::AbstractObject::operator[](const std::string& key)
-{
-	return map[key];
-}
-
-ODF::AbstractObject::ConstIterator ODF::AbstractObject::begin() const noexcept
-{
-	return map.begin();
-}
-
-ODF::AbstractObject::ConstIterator ODF::AbstractObject::end() const noexcept
-{
-	return map.end();
-}
-
-std::map<std::string, ODF>& ODF::AbstractObject::getObjectContainer()
-{
-	return map;
-}
-
-void ODF::AbstractObject::saveToMemory(MemoryDataStream& mem) const
-{
-	// save only the bodies
+	// save bodies seperately
 	for (const IteratorType& it : map)
 		it.second.saveBody(mem);
 }
@@ -3271,26 +3347,92 @@ void ODF::Object::FixedObject::insert(const std::initializer_list<Pair>& pairs)
 		insert(it);
 }
 
+void ODF::Object::FixedObject::erase(const std::string& key)
+{
+	map.erase(key);
+}
+
+bool ODF::Object::FixedObject::contains(const std::string& key) const
+{
+	return map.contains(key);
+}
+
+size_t ODF::Object::FixedObject::count(const std::string& key) const
+{
+	return map.count(key);
+}
+
+size_t ODF::Object::FixedObject::size() const
+{
+	return map.size();
+}
+
+void ODF::Object::FixedObject::clear()
+{
+	map.clear();
+}
+
+ODF::Object::AbstractObject::ConstIterator ODF::Object::FixedObject::begin() const noexcept
+{
+	return map.begin();
+}
+
+ODF::Object::Iterator ODF::Object::FixedObject::begin() noexcept
+{
+	map.begin();
+}
+
+ODF::Object::AbstractObject::ConstIterator ODF::Object::FixedObject::end() const noexcept
+{
+	return map.end();
+}
+
+ODF::Object::Iterator ODF::Object::FixedObject::end() noexcept
+{
+	map.end();
+}
+
+std::map<std::string, ODF>& ODF::Object::FixedObject::getObjectContainer()
+{
+	return map;
+}
+
 ODF& ODF::Object::FixedObject::operator[](const std::string& key)
 {
 	if (auto element = map.find(key); element != map.end())
-	{
 		return element->second;
-	}
 	else
-	{
 		return map[key].immutable();
-	}
 }
 
 ODF& ODF::Object::FixedObject::at(const std::string& key)
 {
-	return map.at(key);
+	return map.at(key); // no need for immutable(), as every element is made immutable on insertion
 }
 
 const ODF& ODF::Object::FixedObject::at(const std::string& key) const
 {
-	return map.at(key);
+	return map.at(key); // no need for immutable(), as every element is made immutable on insertion
+}
+
+ODF::Object::ConstIterator ODF::Object::FixedObject::begin() const noexcept
+{
+	return map.begin();
+}
+
+ODF::Object::Iterator ODF::Object::FixedObject::begin() noexcept
+{
+	return map.begin();
+}
+
+ODF::Object::ConstIterator ODF::Object::FixedObject::end() const noexcept
+{
+	return map.end();
+}
+
+ODF::Object::Iterator ODF::Object::FixedObject::end() noexcept
+{
+	return map.end();
 }
 
 void ODF::Object::FixedObject::setType(const Type& type)
@@ -3336,6 +3478,13 @@ bool ODF::Object::FixedObject::convertTo(std::function<Type(const std::map<std::
 const ODF::Type& ODF::Object::FixedObject::getType() const
 {
 	return fixType;
+}
+
+void ODF::Object::FixedObject::saveToMemory(MemoryDataStream& mem) const
+{
+	// save bodies seperately
+	for (const IteratorType& it : map)
+		it.second.saveBody(mem);
 }
 
 void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem)
@@ -3414,4 +3563,201 @@ const ODF& ODF::Object::at(const std::string& key) const
 	return std::visit([&](const AbstractObject& aobj) -> const ODF& {
 		return aobj.at(key);
 		}, object);
+}
+
+void ODF::Object::MixedObject::insert(const std::string& key, const ODF& odf)
+{
+	map.insert(std::make_pair(key, odf));
+}
+
+void ODF::Object::MixedObject::insert(const Pair& value)
+{
+	map.insert(value);
+}
+
+void ODF::Object::MixedObject::insert(const std::map<std::string, ODF>& map)
+{
+	for (const Pair& it : map)
+		this->map.insert(it);
+}
+
+void ODF::Object::MixedObject::insert(const std::unordered_map<std::string, ODF>& umap)
+{
+	for (const Pair& it : umap)
+		map.insert(it);
+}
+
+void ODF::Object::MixedObject::insert(const std::vector<Pair>& pairs)
+{
+	for (const Pair& it : pairs)
+		map.insert(it);
+}
+
+void ODF::Object::MixedObject::insert(const std::initializer_list<Pair>& pairs)
+{
+	for (const Pair& it : pairs)
+		map.insert(it);
+}
+
+void ODF::Object::MixedObject::erase(const std::string& key)
+{
+	map.erase(key);
+}
+
+bool ODF::Object::MixedObject::contains(const std::string& key) const
+{
+	return map.contains(key);
+}
+
+size_t ODF::Object::MixedObject::count(const std::string& key) const
+{
+	return map.count(key);
+}
+
+size_t ODF::Object::MixedObject::size() const
+{
+	return map.size();
+}
+
+void ODF::Object::MixedObject::clear()
+{
+	map.clear();
+}
+
+ODF& ODF::Object::MixedObject::operator[](const std::string& key)
+{
+	return map[key];
+}
+
+ODF& ODF::Object::MixedObject::at(const std::string& key)
+{
+	return map.at(key);
+}
+
+const ODF& ODF::Object::MixedObject::at(const std::string& key) const
+{
+	map.at(key);
+}
+
+ODF::Object::ConstIterator ODF::Object::MixedObject::begin() const noexcept
+{
+	return map.begin();
+}
+
+ODF::Object::Iterator ODF::Object::MixedObject::begin() noexcept
+{
+	return map.begin();
+}
+
+ODF::Object::ConstIterator ODF::Object::MixedObject::end() const noexcept
+{
+	return map.end();
+}
+
+ODF::Object::Iterator ODF::Object::MixedObject::end() noexcept
+{
+	return map.end();
+}
+
+std::map<std::string, ODF>& ODF::Object::MixedObject::getObjectContainer()
+{
+	return map;
+}
+
+void ODF::List::MixedArray::push_back(const ODF& odf)
+{
+	list.push_back(odf);
+}
+
+void ODF::List::MixedArray::push_front(const ODF& odf)
+{
+	list.insert(list.begin(), odf);
+}
+
+void ODF::List::MixedArray::erase(size_t index)
+{
+	list.erase(list.begin() + index);
+}
+
+void ODF::List::MixedArray::erase(size_t index, size_t numberOfElements)
+{
+	if (!numberOfElements)
+		return;
+	list.erase(list.begin() + index, list.begin() + index + numberOfElements - 1);
+}
+
+void ODF::List::MixedArray::erase_range(size_t from, size_t to)
+{
+	list.erase(list.begin() + from, list.begin() + to);
+}
+
+void ODF::List::MixedArray::insert(size_t where, const ODF& odf)
+{
+	list.insert(list.begin() + where, odf);
+}
+
+std::optional<size_t> ODF::List::MixedArray::find(const ODF& odf) const
+{
+	auto it = std::find(list.begin(), list.end(), odf);
+	return it == list.end() ? std::nullopt : std::make_optional(std::distance(list.begin(), it));
+}
+
+size_t ODF::List::MixedArray::size() const
+{
+	return list.size();
+}
+
+void ODF::List::MixedArray::clear()
+{
+	list.clear();
+}
+
+void ODF::List::MixedArray::resize(size_t newSize)
+{
+	list.resize(newSize);
+}
+
+ODF& ODF::List::MixedArray::operator[](size_t index)
+{
+	return list[index];
+}
+
+const ODF& ODF::List::MixedArray::operator[](size_t index) const
+{
+	return list[index];
+}
+
+ODF& ODF::List::MixedArray::at(size_t index)
+{
+	return list.at(index);
+}
+
+const ODF& ODF::List::MixedArray::at(size_t index) const
+{
+	return list.at(index);
+}
+
+ODF::List::ConstIterator ODF::List::MixedArray::begin() const noexcept
+{
+	return list.begin();
+}
+
+ODF::List::Iterator ODF::List::MixedArray::begin() noexcept
+{
+	return list.begin();
+}
+
+ODF::List::ConstIterator ODF::List::MixedArray::end() const noexcept
+{
+	return list.end();
+}
+
+ODF::List::Iterator ODF::List::MixedArray::end() noexcept
+{
+	return list.end();
+}
+
+std::vector<ODF>& ODF::List::MixedArray::getArrayContainer()
+{
+	return list;
 }
