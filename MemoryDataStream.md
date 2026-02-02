@@ -248,6 +248,15 @@ mem.peek(destination, size);
 int i = mem.peek<int>();
 ```
 
+Accessing the previously read or written byte (used in SizeSpecififierSpecifier)
+```cpp
+// read previous byte
+char byte = mem.peekPrevious();
+
+// set previous byte
+mem.setPrevious(5ui8);
+```
+
 Size:
 ```cpp
 // get size
