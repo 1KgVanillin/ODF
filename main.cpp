@@ -56,8 +56,7 @@ int main()
 		odf.push_back(6ui32);
 		odf.push_back(7);
 
-		//odf[1].convertTo(ODF::Type(ODF::TypeSpecifier::BYTE)); // illegal ?
-		//odf[1] = "fisch"; // illegal ?
+		odf[1] = "fisch"; // illegal ?
 
 		cout << "start:\n" << odf << "\n";
 

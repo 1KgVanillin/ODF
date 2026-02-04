@@ -269,6 +269,31 @@ bool operator!=(const ODF::Type& t1, const ODF::Type& t2)
 	return !operator==(t1, t2);
 }
 
+bool DF_API operator==(const ODF::Object& obj1, const ODF::Object& obj2)
+{
+	if (obj1.size() != obj2.size())
+		return false;
+
+	if (obj1.isMixed() != obj2.isMixed())
+		return false;
+
+	try {
+		for (const ODF::Pair& it : obj1)
+			if (obj2.at(it.first) != it.second)
+				return false;
+	}
+	catch (...)
+	{
+		return false;
+	}
+	return true;
+}
+
+bool DF_API operator!=(const ODF::Object& obj1, const ODF::Object& obj2)
+{
+	return !(obj1 == obj2);
+}
+
 bool operator==(const ODF::List& arr1, const ODF::List& arr2)
 {
 	if (arr1.size() != arr2.size())
@@ -590,6 +615,11 @@ unsigned char ODF::Type::getSize() const
 
 void ODF::Type::setFixType(const Type& type)
 {
+	const Type* ftype = getFixType();
+	if (ftype)
+		if (*ftype == type)
+			return; // fixtype already same
+
 	checkImmutable();
 	if (isPrimitive() || isMixed())
 	{
@@ -861,8 +891,7 @@ ODF& ODF::operator=(const List::FixedArray& farr)
 {
 	type = TypeSpecifier::FXLIST;
 	std::get<FixedArraySpecifier>(std::get<ArraySpecifier>(*type.complexSpec)).fixType = farr.getType();
-	List dbg(farr);
-	content = dbg;
+	content.emplace<List>() = List(farr);
 	return *this;
 }
 
@@ -1703,6 +1732,7 @@ ODF::Type& ODF::Type::operator=(const Type& other)
 		return *this;
 
 	checkImmutable();
+	immutable = other.immutable;
 	type = other.type;
 	if (complexSpec) delete complexSpec;
 	complexSpec = nullptr;
@@ -1726,6 +1756,14 @@ ODF::Type::Type() : complexSpec(nullptr), immutable(false) {}
 ODF::Type::Type(const Type& other) : complexSpec(nullptr), immutable(false)
 {
 	*this = other;
+}
+
+ODF::Type::Type(Type&& type)
+{
+	this->immutable = type.immutable;
+	this->complexSpec = type.complexSpec;
+	type.complexSpec = nullptr;
+	this->type = type.type;
 }
 
 ODF::Type::Type(TypeSpecifier type) : complexSpec(nullptr), immutable(false)
@@ -1956,7 +1994,8 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 
 void ODF::Type::setType(TypeSpecifier type)
 {
-	checkImmutable();
+	if (this->type != type)
+		checkImmutable();
 	if (complexSpec) delete complexSpec;
 
 	this->type = type;
@@ -2516,7 +2555,7 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 			THROW TypeMismatch();
 		}
 	}
-	list[list.size() - 1].type.makeImmutable();
+	list.back().immutable();
 }
 
 void ODF::List::FixedArray::push_front(const ODF& odf)
@@ -2538,7 +2577,7 @@ void ODF::List::FixedArray::push_front(const ODF& odf)
 			THROW TypeMismatch();
 		}
 	}
-	list[0].type.makeImmutable();
+	list.front().immutable();
 }
 
 void ODF::List::FixedArray::erase(size_t index)

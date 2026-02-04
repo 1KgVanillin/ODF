@@ -30,51 +30,51 @@ class DF_API ODF // optimized object format
 {
 public:
 	// error types
-	struct Config
+	struct DF_API Config
 	{
 		static bool PreventAutomaticMergeLossString;
 		static bool PreventAutomaticMergeLossFloat;
 		static unsigned char DefaultIntegerMergeSize;
 	};
 	
-	struct ComplexExplicitor
+	struct DF_API ComplexExplicitor
 	{
 	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ODF; } __OBJ;
 	};
 
 	// generic development exception
-	struct SixSeven : public std::runtime_error
+	struct DF_API SixSeven : public std::runtime_error
 	{
 		SixSeven(const std::string& message = "67 (six - seven)");
 	};
 	// Thrown if a member function that is fixed on a specific type is called for an invalid type
 	// For example if push_back would be called on a non list element
-	struct TypeMismatch : public std::runtime_error
+	struct DF_API TypeMismatch : public std::runtime_error
 	{
 		TypeMismatch(const std::string& message = "TypeMismatch exception");
 	};
 	// Throw if any condition is reached that should be unreachable in a correct implementation. Should in theory never be thrown
-	struct InvalidCondition : public std::runtime_error
+	struct DF_API InvalidCondition : public std::runtime_error
 	{
 		InvalidCondition(const std::string& message = "InvalidCondition triggered");
 	};
 	// Throw if a specifier contains a wrong number of elements or properties for loading a type
-	struct SpecifierMismatch : public std::runtime_error
+	struct DF_API SpecifierMismatch : public std::runtime_error
 	{
 		SpecifierMismatch(const std::string& message = "SpecifierMismatch exception");
 	};
 	// Thrown if a function is called that is not valid for the current type, (for example calling push_back on an integer or setFixType on a mixed List)
-	struct InvalidType : public std::runtime_error
+	struct DF_API InvalidType : public std::runtime_error
 	{
 		InvalidType(const std::string& message = "InvalidType exception");
 	};
 	// Thrown if a conversion function is called for object of a different typeclass
-	struct InvalidConversion : public std::runtime_error
+	struct DF_API InvalidConversion : public std::runtime_error
 	{
 		InvalidConversion(const std::string& message = "InvalidConversion exception");
 	};
 	// Thrown if a function attempts to change a type that is currently immutable
-	struct InvalidTypeMutation : public std::runtime_error
+	struct DF_API InvalidTypeMutation : public std::runtime_error
 	{
 		InvalidTypeMutation(const std::string& message = "InvalidTypeMutation exception");
 	};
@@ -84,9 +84,9 @@ public:
 	static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
 
 	// Specifiers
-	struct Type;
+	struct DF_API Type;
 
-	struct Status
+	struct DF_API Status
 	{
 		enum Value {
 			Ok = 0,
@@ -107,14 +107,14 @@ public:
 		Status(Value val = Status::Ok);
 	};
 
-	class AbstractDataObject
+	class DF_API AbstractDataObject
 	{
 	public:
 		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
 		virtual void loadFromMemory(MemoryDataStream& mem) = 0;
 	};
 
-	class TypeSpecifier : public AbstractDataObject // The size specifier specifier is removed automatically when impicitely used.
+	class DF_API TypeSpecifier : public AbstractDataObject // The size specifier specifier is removed automatically when impicitely used.
 	{
 	public:
 		typedef unsigned char Type;
@@ -180,7 +180,7 @@ public:
 		static constexpr Type MXLIST = FLAG_LIST | FLAG_MIXED;
 	};
 
-	struct SizeSpecifier : public AbstractDataObject
+	struct DF_API SizeSpecifier : public AbstractDataObject
 	{
 		static constexpr size_t OverflowSize8bit = 256;
 		static constexpr size_t OverflowSize16bit = 65'536;
@@ -198,7 +198,7 @@ public:
 		SizeSpecifier();
 	};
 
-	enum class TypeClass
+	enum class DF_API TypeClass
 	{
 		Int,
 		Float,
@@ -208,10 +208,10 @@ public:
 	};
 
 	// forward declarations
-	struct FixedArraySpecifier;
-	struct MixedArraySpecifier;
-	struct FixedObjectSpecifier;
-	struct MixedObjectSpecifier;
+	struct DF_API FixedArraySpecifier;
+	struct DF_API MixedArraySpecifier;
+	struct DF_API FixedObjectSpecifier;
+	struct DF_API MixedObjectSpecifier;
 
 	// variant type definitions
 	typedef size_t VariantType;
@@ -229,11 +229,11 @@ public:
 	static constexpr VariantType VT_WSTR = 11;
 	static constexpr VariantType VT_OBJ = 12;
 	static constexpr VariantType VT_LIST = 13;
-	struct VariantTypeConversionError : std::runtime_error { VariantTypeConversionError(std::string message = "Invalid Conversion from type [NULL] or [undefined] to ODF::VariantType"); };
+	struct DF_API VariantTypeConversionError : std::runtime_error { VariantTypeConversionError(std::string message = "Invalid Conversion from type [NULL] or [undefined] to ODF::VariantType"); };
 
 	typedef std::variant<MixedObjectSpecifier, FixedObjectSpecifier> ObjectSpecifier;
 	typedef std::variant<MixedArraySpecifier, FixedArraySpecifier> ArraySpecifier;
-	struct Type // a full type header
+	struct DF_API Type // a full type header
 	{ // pointers are used as optionals. Deallocated in destructor
 		TypeSpecifier type; // Note that immutable must be false to change this. If write-accessing this member manually, a check to immutable is needed
 		bool immutable; // if true, an InvalidTypeMutation is thrown if a non-const member fucntion is called
@@ -278,8 +278,8 @@ public:
 		void makeComplexSpec(); // memory leak safe. Makes sure complexSpec is valid, keeps the old one if one is already existing
 		void resetComplexSpec(); // memory leak safe. If an old complexSpec exists it gets destroyed, then a fresh one is allcated. Maybe fix performace of this by keeping and overwriting the old object? TODO
 
-		friend bool operator==(const Type& t1, const Type& t2);
-		friend bool operator!=(const Type& t1, const Type& t2);
+		friend bool DF_API operator==(const Type& t1, const Type& t2);
+		friend bool DF_API operator!=(const Type& t1, const Type& t2);
 		bool operator!(); // returns !(type != NULL) -> type == NULL
 
 		operator unsigned char();
@@ -288,6 +288,7 @@ public:
 
 		Type();
 		Type(const Type& other);
+		Type(Type&& type);
 		Type(TypeSpecifier type);
 		~Type();
 
@@ -296,7 +297,7 @@ public:
 
 	// The ArraySpecifier holds all type information that is needed to load or save an array.
 	// saves or loads the size specifier on save
-	struct FixedArraySpecifier : public AbstractDataObject
+	struct DF_API FixedArraySpecifier : public AbstractDataObject
 	{
 		SizeSpecifier size;
 		Type fixType; // always holds a value, is just a pointer because of the forward declaring
@@ -304,7 +305,7 @@ public:
 		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
-	struct MixedArraySpecifier : public AbstractDataObject
+	struct DF_API MixedArraySpecifier : public AbstractDataObject
 	{
 		std::vector<Type> types;
 
@@ -312,7 +313,7 @@ public:
 		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
-	struct FixedObjectSpecifier : public AbstractDataObject
+	struct DF_API FixedObjectSpecifier : public AbstractDataObject
 	{
 		Type fixType;
 		std::vector<std::string> keys;
@@ -320,7 +321,7 @@ public:
 		void loadFromMemory(MemoryDataStream& mem) override;
 	};
 
-	struct MixedObjectSpecifier : public AbstractDataObject
+	struct DF_API MixedObjectSpecifier : public AbstractDataObject
 	{
 		typedef const std::pair<std::string, Type>& ObjectIterator;
 		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
@@ -329,7 +330,7 @@ public:
 	};
 
 	// Complex data object functions
-	class AbstractComplexDataObject
+	class DF_API AbstractComplexDataObject
 	{
 	public:
 		virtual void makeMixed() = 0;
@@ -339,7 +340,7 @@ public:
 		virtual Type getFixedDatatype() const = 0;
 	};
 
-	class AbstractObject
+	class DF_API AbstractObject
 	{
 	public:
 		typedef std::pair<const std::string, ODF> Pair;
@@ -380,10 +381,10 @@ public:
 
 	// The just like with the Array, the AbstractObject is an implementation of the MixedAObject. The MixedObject inherits all functions from it and adds loadFromMemory
 	// The FIxedObject inherits the functions of the AbstractObjects, adds a loadFromMemory and overwrites all isnertion and access functions to perform type checks
-	class Object :  public AbstractObject, public AbstractComplexDataObject
+	class DF_API Object :  public AbstractObject, public AbstractComplexDataObject
 	{
 	public:
-		class FixedObject : public AbstractObject
+		class DF_API FixedObject : public AbstractObject
 		{
 			std::map<std::string, ODF> map;
 			Type fixType;
@@ -456,7 +457,7 @@ public:
 			friend class ODF::Object;
 		};
 
-		class MixedObject : public AbstractObject
+		class DF_API MixedObject : public AbstractObject
 		{
 			std::map<std::string, ODF> map;
 		public:
@@ -536,6 +537,9 @@ public:
 		FixedObject& fixed();
 		MixedObject& mixed();
 
+		friend bool DF_API operator==(const Object& obj1, const Object& obj2);
+		friend bool DF_API operator!=(const Object& obj1, const Object& obj2);
+
 		Object& operator=(const Object& other);
 		Object& operator=(const Object::MixedObject& mobj);
 		Object& operator=(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
@@ -557,7 +561,7 @@ public:
 	// The AbstractArray is an implementation of the mixed array.
 	// The mixedArray inherits everything from it.
 	// The FixedArray inherits erase, etc. and overwrites the push and insert functions to make a fixed check
-	class AbstractArray
+	class DF_API AbstractArray
 	{
 	public:
 		typedef std::vector<ODF>::const_iterator ConstIterator;
@@ -595,10 +599,10 @@ public:
 		virtual void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) = 0;
 	};
 	
-	class List : public AbstractComplexDataObject, public AbstractArray
+	class DF_API List : public AbstractComplexDataObject, public AbstractArray
 	{
 	public:
-		class FixedArray : public AbstractArray
+		class DF_API FixedArray : public AbstractArray
 		{
 			std::vector<ODF> list;
 			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
@@ -658,7 +662,7 @@ public:
 		};
 
 		// inherits all vector functions from AbstractArray
-		class MixedArray : public AbstractArray
+		class DF_API MixedArray : public AbstractArray
 		{
 			std::vector<ODF> list;
 		public:
@@ -739,8 +743,8 @@ public:
 		void resetAndSetSize(size_t newSize, const std::vector<Type>& newTypes); // this function is called by the root object which loads the specifier to tell the array their size. All current data is lost.
 		void resetAndSetSize(size_t newSize, const Type& newType); // this function is called by the root object which loads the specifier to tell the array their size. All current data is lost. Works only on fixed arrays
 
-		friend bool operator==(const List& arr1, const List& arr2);
-		friend bool operator!=(const List& arr1, const List& arr2);
+		friend bool DF_API operator==(const List& arr1, const List& arr2);
+		friend bool DF_API operator!=(const List& arr1, const List& arr2);
 		List& operator=(const List& other);
 		List& operator=(const MixedArray& other);
 		List& operator=(const std::initializer_list<ODF>& initializer_list);
