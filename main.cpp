@@ -25,12 +25,13 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 }
 
 // TODO
-// implement conversion mechanics for complex types
-// construcot and operator= forwarding for Object
 
 // planned features
 // typedef support
 // using types from exteral files
+
+// current debug TODO
+// implement in place construction of fixed objects
 
 int main()
 {
@@ -42,18 +43,18 @@ int main()
 	// odf = map / unordered_map
 	
 	try {
-		ODF odf = {
+		/*ODF odf = {
 			ODF::__OBJ,
 			ODF::Pair{"peins", 19},
 			ODF::Pair{"penis", 20}
-		};
+		};*/
 
-		ODF::List::FixedArray fobj;
-		ODF::List::MixedArray mobj;
+		ODF odf = { 5, 6, 7 };
 
-		//odf.push_back(5ui32); // Exception
-		//odf.push_back(6ui32);
-		//odf.push_back(7);
+
+		odf.push_back(5ui32); // Exception
+		odf.push_back(6ui32);
+		odf.push_back(7);
 
 		//odf[1].convertTo(ODF::Type(ODF::TypeSpecifier::BYTE)); // illegal ?
 		//odf[1] = "fisch"; // illegal ?
@@ -67,14 +68,15 @@ int main()
 			cout << "penis\n";
 
 		ODF o2;
-		o2.loadFromMemory(data, 10000);
+		o2.loadFromMemory(data, 10000); // BUG: THe load from memory function produces an invalid object. That means that the ODF::Type and the std::variat::index
+		// doesn't actually match, which is why operator== throws a std::bad_variant_access
 
 		cout << "\n\nresult:\n" << odf << "---\n" << o2 << "\n\n";
 
 		if (odf.size() != o2.size())
 			cout << "size mismatch\n";
 
-		cout << "equal: " << std::boolalpha << (odf == o2);
+		cout << "equal: " << std::boolalpha << (odf == o2) << "\n\n\n";
 
 		return 0;
 	}

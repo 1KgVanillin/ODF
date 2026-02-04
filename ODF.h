@@ -195,7 +195,7 @@ public:
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
 		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
 		void loadFromMemory(MemoryDataStream& mem) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
-		SizeSpecifier() = default;
+		SizeSpecifier();
 	};
 
 	enum class TypeClass
@@ -241,7 +241,7 @@ public:
 		ComplexSpecifier* complexSpec; // holds object specification optionallly
 
 		void makeImmutable();
-		void checkImmutable() const;
+		void checkImmutable() const; // THrows an exception if immutable. Ignore that if type == NULL. The NULL type also expresses an "uninitialized" type that can be written.
 		void readTypeSpecifier(MemoryDataStream& mem); // loads the type specifier from a stream and performs mutation check
 		void clear(); // deletes every optional specifier
 		Status saveToMemory(MemoryDataStream& mem) const;
@@ -369,14 +369,21 @@ public:
 		virtual ConstIterator end() const noexcept = 0;
 		virtual Iterator end() noexcept = 0;
 		virtual std::map<std::string, ODF>& getObjectContainer() = 0;
+
+		// order:
+		// update the keys, save the specifier, save the object.
+		// or loadFromMemory with specifier (load specifier, then load object)
+		virtual void updateKeys(ObjectSpecifier& spec) const = 0;
+		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) = 0;
 	};
 
 	// The just like with the Array, the AbstractObject is an implementation of the MixedAObject. The MixedObject inherits all functions from it and adds loadFromMemory
 	// The FIxedObject inherits the functions of the AbstractObjects, adds a loadFromMemory and overwrites all isnertion and access functions to perform type checks
-	class Object :  public AbstractObject, public AbstractComplexDataObject, public AbstractDataObject
+	class Object :  public AbstractObject, public AbstractComplexDataObject
 	{
 	public:
-		class FixedObject : public AbstractObject, public AbstractDataObject
+		class FixedObject : public AbstractObject
 		{
 			std::map<std::string, ODF> map;
 			Type fixType;
@@ -408,9 +415,10 @@ public:
 			bool convertTo(const Type& type);
 			bool convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter);
 			const Type& getType() const; // returns the type of the elements contained in the object
-
+			
+			void updateKeys(ObjectSpecifier& spec) const override;
 			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem) override; // only the fixtype must be set exterally
+			void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
 
 			FixedObject();
 			template<typename T>
@@ -448,7 +456,7 @@ public:
 			friend class ODF::Object;
 		};
 
-		class MixedObject : public AbstractObject, public AbstractDataObject
+		class MixedObject : public AbstractObject
 		{
 			std::map<std::string, ODF> map;
 		public:
@@ -475,11 +483,13 @@ public:
 			Iterator end() noexcept override;
 			std::map<std::string, ODF>& getObjectContainer() override;
 
+			void updateKeys(ObjectSpecifier& spec) const override;
 			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem) override; // every type must be set externally
+			void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
 
 			MixedObject();
 			MixedObject(const std::initializer_list<Pair>& elements);
+			MixedObject(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
 
 			friend class ODF::Object;
 		};
@@ -499,12 +509,6 @@ public:
 		size_t size() const override;
 		void clear() override;
 
-		ConstIterator begin() const noexcept override;
-		Iterator begin() noexcept override;
-		ConstIterator end() const noexcept override;
-		Iterator end() noexcept override;
-		std::map<std::string, ODF>& getObjectContainer() override;
-
 		ODF& operator[](const std::string& key) override; // also overwritten by FixedObject, as it could insert elements
 		ODF& at(const std::string& key) override;
 		const ODF& at(const std::string& key) const override;
@@ -515,10 +519,10 @@ public:
 		Iterator end() noexcept override;
 		std::map<std::string, ODF>& getObjectContainer() override;
 
-		void loadFromMemory(MemoryDataStream& mem) override; // only the fixtype must be set exterally
+		void updateKeys(ObjectSpecifier& spec) const override;
 		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
 
-		void clear() override;
 		void clearAndFix(); // clear and make fixed
 		void clearAndFix(const Type& elementType); // clear and make fixed
 		void clearAndMix(); // clear and make mixed
@@ -582,12 +586,19 @@ public:
 		virtual ConstIterator end() const noexcept = 0;
 		virtual Iterator end() noexcept = 0;
 		virtual std::vector<ODF>& getArrayContainer() = 0;
+
+		// order:
+		// update the keys, save the specifier, save the object.
+		// or loadFromMemory with specifier (load specifier, then load object)
+		virtual void updateSpec(ArraySpecifier& spec) const = 0;
+		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) = 0;
 	};
 	
-	class List : public AbstractComplexDataObject, public AbstractArray, AbstractDataObject
+	class List : public AbstractComplexDataObject, public AbstractArray
 	{
 	public:
-		class FixedArray : public AbstractArray, public AbstractDataObject
+		class FixedArray : public AbstractArray
 		{
 			std::vector<ODF> list;
 			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
@@ -622,8 +633,9 @@ public:
 			bool convertTo(std::function<Type(const std::vector<ODF>&)> type, std::function<void(ODF& odf)> converter);
 			const Type& getType() const;
 
+			void updateSpec(ArraySpecifier& spec) const override;
 			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem) override;
+			void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) override;
 
 			struct InvalidTypeChange : public std::runtime_error
 			{
@@ -646,7 +658,7 @@ public:
 		};
 
 		// inherits all vector functions from AbstractArray
-		class MixedArray : public AbstractArray, public AbstractDataObject
+		class MixedArray : public AbstractArray
 		{
 			std::vector<ODF> list;
 		public:
@@ -673,8 +685,9 @@ public:
 			Iterator end() noexcept override;
 			std::vector<ODF>& getArrayContainer() override;
 
+			void updateSpec(ArraySpecifier& spec) const override;
 			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem) override;
+			void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) override;
 
 			MixedArray();
 			MixedArray(const std::initializer_list<ODF>& initializer_list);
@@ -705,11 +718,15 @@ public:
 		Iterator end() noexcept override;
 		std::vector<ODF>& getArrayContainer() override;
 
+		void updateSpec(ArraySpecifier& spec) const override;
+		void saveToMemory(MemoryDataStream& mem) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) override;
+
 		// type functions
-		void clear() override;
 		void clearAndFix(); // clear and make fixed
 		void clearAndFix(const Type& elementType); // clear and make fixed
 		void clearAndMix(); // clear and make mixed
+
 		void makeMixed() override; // TODO
 		Type canBeFixed() const override; // returns NULLTYPE if not fixable and UNDEFINED if empty
 		bool tryFixing() override; // TODO
@@ -721,8 +738,6 @@ public:
 
 		void resetAndSetSize(size_t newSize, const std::vector<Type>& newTypes); // this function is called by the root object which loads the specifier to tell the array their size. All current data is lost.
 		void resetAndSetSize(size_t newSize, const Type& newType); // this function is called by the root object which loads the specifier to tell the array their size. All current data is lost. Works only on fixed arrays
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
 
 		friend bool operator==(const List& arr1, const List& arr2);
 		friend bool operator!=(const List& arr1, const List& arr2);
@@ -847,7 +862,7 @@ public:
 	ODF(const List::FixedArray& farr);
 	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(List::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
 	template<typename T> ODF(const std::vector<T>& vector) : ODF(List::FixedArray(vector)) {}
-	template<typename T> ODF(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& initializer_list) : ODF(Object::FixedObject(initializer_list)) {}
+	template<typename T> ODF(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& initializer_list) { *this = initializer_list;  }
 	template<typename T>
 	ODF(const std::map<std::string, T>& map)
 	{
@@ -901,7 +916,7 @@ public:
 	}
 
 	// list functions
-	void makeList(); // clears content and converts element to a list
+	void makeList(); // clears content and converts element to a mixed list
 	void makeList(const Type& elementType); // clears content and converts to fxlist of with elementtype
 	void makeList(const TypeSpecifier& elementType); // clears content and converts to fxlist of with elementtype
 	void push_back(const ODF& odf);
@@ -921,6 +936,9 @@ public:
 
 	// object functions
 	using Pair = Object::Pair;
+	void makeObject(); // clears content and converts element to a mixed object
+	void makeObject(const Type& elementType); // clears content and converts to mxobj with fixType = elementType
+	void makeObject(const TypeSpecifier& elementType); // clears content and converts to mxobj with fixType = elementType
 	virtual void insert(const std::string& key, const ODF& odf);
 	virtual void insert(const Pair& value);
 	virtual void insert(const std::map<std::string, ODF>& map);
@@ -942,6 +960,7 @@ public:
 	const ODF& at(const std::string& key) const; // throws bad_variant_access if called on a object
 	ODF& operator[](size_t index); // throws bad_variant_access if called on not an array
 	ODF& operator[](const std::string& key); // throws bad_variant_access if called on a object
+	ODF& operator[](const char* key);
 
 	// visitors (replacement for Iterators for now, and for advanced or accelerated processing directly in the object)
 	template<typename Func> void visit(Func&& functor)
@@ -998,8 +1017,6 @@ public:
 	Status loadFromStream(std::istream& in, bool binary = true);
 
 private:
-	void updateSize(); // will dereferece a nullptr if the type doesn't has a sizeSpecfier or throw an std::bad_variant_access
-
 	Status saveBody(MemoryDataStream& mem) const;
 	Status saveObject(MemoryDataStream& mem) const;
 	Status saveArray(MemoryDataStream& mem) const;
