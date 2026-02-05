@@ -30,8 +30,7 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 // typedef support
 // using types from exteral files
 
-// current debug TODO
-// implement in place construction of fixed objects
+// current debug TODO 
 
 int main()
 {
@@ -41,24 +40,14 @@ int main()
 	//   { "key2", value2 }
 	// } in fixed and mixed (detected at consutruction)
 	// odf = map / unordered_map
-	
+
 	try {
-		/*ODF odf = {
-			ODF::__OBJ,
-			ODF::Pair{"peins", 19},
-			ODF::Pair{"penis", 20}
-		};*/
 
-		ODF odf = { 5, 6, 7 };
-
-
-		odf.push_back(5ui32); // Exception
-		odf.push_back(6ui32);
-		odf.push_back(7);
-
-		odf[1] = "fisch"; // illegal ?
+		ODF odf = 5;
 
 		cout << "start:\n" << odf << "\n";
+
+		odf["penis"s] = 6;
 
 		char data[10000] = {};
 		memset(data, 1, 100);

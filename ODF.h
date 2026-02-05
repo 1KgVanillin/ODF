@@ -39,7 +39,8 @@ public:
 	
 	struct DF_API ComplexExplicitor
 	{
-	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ODF; } __OBJ;
+	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ODF; } __MOBJ;
+	static struct FOBJSTRUCT { private: FOBJSTRUCT() = default; friend class ODF; } __FOBJ;
 	};
 
 	// generic development exception
@@ -288,7 +289,7 @@ public:
 
 		Type();
 		Type(const Type& other);
-		Type(Type&& type);
+		Type(Type&& type) noexcept;
 		Type(TypeSpecifier type);
 		~Type();
 
@@ -447,7 +448,7 @@ public:
 					insert(it);
 			}
 			template<typename T>
-			FixedObject(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& pairs)
+			FixedObject(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& pairs)
 			{
 				for (const std::variant<std::pair<std::string, T>, ComplexExplicitor>& it : pairs)
 					if (!it.index())
@@ -544,7 +545,7 @@ public:
 		Object& operator=(const Object::MixedObject& mobj);
 		Object& operator=(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
 		Object& operator=(const Object::FixedObject& fobj);
-		template<typename T> Object& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& pairs) {
+		template<typename T> Object& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& pairs) {
 			object.emplace<FixedObject>() = FixedObject(pairs);
 			return *this;
 		} // templated sigma rizz
@@ -554,7 +555,7 @@ public:
 		Object(const Object::MixedObject& mobj);
 		Object(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
 		Object(const Object::FixedObject& fobj);
-		template<typename T> Object(ComplexExplicitor::OBJSTRUCT, const std::initializer_list<std::pair<std::string, T>>& pairs) { *this = FixedObject(pairs); }
+		template<typename T> Object(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& pairs) { *this = FixedObject(pairs); }
 	};
 
 
@@ -822,8 +823,8 @@ public:
 	ODF& operator=(const Object::MixedObject& mobj);
 	ODF& operator=(const std::initializer_list<std::variant<Object::Pair, ComplexExplicitor::OBJSTRUCT>>& initializer_list);
 	ODF& operator=(const Object::FixedObject& fobj);
-	template<typename T> ODF& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& initializer_list) { *this = Object::FixedObject(initializer_list); }
-	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { *this = List::FixedArray(initializer_list); }
+	template<typename T> ODF& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& initializer_list) { *this = Object::FixedObject(initializer_list); }
+	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { return *this = List::FixedArray(initializer_list); }
 	
 	operator INT_8();
 	operator UINT_8();
@@ -866,7 +867,7 @@ public:
 	ODF(const List::FixedArray& farr);
 	template<typename T> ODF(const std::initializer_list<T>& initializer_list) : ODF(List::FixedArray(initializer_list)) {} // although a (ODF(Array(...)) would be sufficient, the fixed array is needed to explicitely invoke the ODF(FixedArray) constructor which explicitely calls operator=(const FixedArray&) which updates the size specifier
 	template<typename T> ODF(const std::vector<T>& vector) : ODF(List::FixedArray(vector)) {}
-	template<typename T> ODF(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::OBJSTRUCT>>& initializer_list) { *this = initializer_list;  }
+	template<typename T> ODF(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& initializer_list) { *this = initializer_list;  }
 	template<typename T>
 	ODF(const std::map<std::string, T>& map)
 	{
@@ -925,10 +926,10 @@ public:
 	void makeList(const TypeSpecifier& elementType); // clears content and converts to fxlist of with elementtype
 	void push_back(const ODF& odf);
 	void push_front(const ODF& odf);
+	void insert(size_t where, const ODF& odf);
 	void erase(size_t index);
 	void erase(size_t index, size_t numberOfElements);
 	void erase_range(size_t from, size_t to);
-	void insert(size_t where, const ODF& odf);
 	std::optional<size_t> find(const ODF& odf);
 	bool push_back_nothrow(const ODF& odf) noexcept;
 	bool push_front_nothrow(const ODF& odf) noexcept;
@@ -963,8 +964,7 @@ public:
 	ODF& at(const std::string& key); // throws bad_variant_access if called on a object
 	const ODF& at(const std::string& key) const; // throws bad_variant_access if called on a object
 	ODF& operator[](size_t index); // throws bad_variant_access if called on not an array
-	ODF& operator[](const std::string& key); // throws bad_variant_access if called on a object
-	ODF& operator[](const char* key);
+	ODF& operator[](std::string_view key); // throws bad_variant_access if called on a object
 
 	// visitors (replacement for Iterators for now, and for advanced or accelerated processing directly in the object)
 	template<typename Func> void visit(Func&& functor)
@@ -1032,5 +1032,35 @@ private:
 public:
 	// predefined Types:
 
-	static ComplexExplicitor::OBJSTRUCT __OBJ;
+	static ComplexExplicitor::OBJSTRUCT __MOBJ;
+	static ComplexExplicitor::FOBJSTRUCT __FOBJ;
+
+	typedef std::unordered_map<size_t, Type> PoolType;
+	typedef std::shared_ptr<PoolType> Pool;
+	class DF_API PoolCollection
+	{
+	public:
+		std::vector<Pool> importPools; // pools from which types are imported
+		std::vector<Pool> exportPools; // pools from which types are exported
+
+		void addImportPool(Pool pool);
+		void addExportPool(Pool pool);
+		void addPool(Pool pool); // adds as both inport and export
+
+		std::optional<Type> importType(size_t id) const; // searches the input pools
+		void exportType(size_t id, const Type& type);
+		void exportType(const std::pair<size_t, const Type&>& pair);
+
+		Pool operator=(Pool pool); // clears all pools, then adds 'pool' as both import and export
+		Pool operator+=(Pool pool); // adds 'pool' as both import and export
+
+		PoolCollection() = default;
+		PoolCollection(Pool pool); // adds 'pool' as import and export
+		PoolCollection(Pool importPool, Pool exportPool);
+
+		// create a new pool
+		static Pool makePool(); // destroyed automatically by shared_ptr
+	};
 };
+
+using std::literals::string_literals::operator""s;

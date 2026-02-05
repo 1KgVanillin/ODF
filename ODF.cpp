@@ -7,7 +7,8 @@ bool ODF::printType = true;
 std::mutex ODF::printMutex;
 #endif
 unsigned char ODF::Config::DefaultIntegerMergeSize = 0;
-ODF::ComplexExplicitor::OBJSTRUCT ODF::__OBJ{};
+ODF::ComplexExplicitor::OBJSTRUCT ODF::__MOBJ{};
+ODF::ComplexExplicitor::FOBJSTRUCT ODF::__FOBJ{};
 
 #pragma region specifiers
 void ODF::Type::makeImmutable()
@@ -255,11 +256,31 @@ bool operator==(const ODF::Type& t1, const ODF::Type& t2)
 	{
 		if (t1.isFixed())
 		{
-
+			ODF::FixedObjectSpecifier* spec1 = t1.fixedObjectSpecifier();
+			ODF::FixedObjectSpecifier* spec2 = t2.fixedObjectSpecifier();
+			if (spec1->fixType != spec2->fixType)
+				return false;
+			if (spec1->keys.size() != spec2->keys.size())
+				return false;
+			for (size_t i = 0; i < spec1->keys.size(); i++)
+				if (spec1->keys[i] != spec2->keys[i])
+					return false;
+			return true;
 		}
 		else
 		{
-
+			ODF::MixedObjectSpecifier* spec1 = t1.mixedObjectSpecifier();
+			ODF::MixedObjectSpecifier* spec2 = t2.mixedObjectSpecifier();
+			try {
+				for (const std::pair<std::string, ODF::Type>& it : spec1->properties)
+					if (spec2->properties.at(it.first) != it.second)
+						return false;
+			}
+			catch (std::out_of_range&)
+			{
+				return false; // a key wasn't found
+			}
+			return true;
 		}
 	}
 }
@@ -315,18 +336,18 @@ bool operator!=(const ODF::List& arr1, const ODF::List& arr2)
 
 std::ostream& operator<<(std::ostream& out, const ODF& odf)
 {
-	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << (odf.printType ? "[BYTE] " : "") << (signed short)*ptr; }
-	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << (odf.printType ? "[UBYTE] " : "") << (signed short)*ptr; }
-	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << (odf.printType ? "[SHORT] " : "") << *ptr; }
-	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << (odf.printType ? "[USHORT] " : "") << *ptr; }
-	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << (odf.printType ? "[INT] " : "") << *ptr; }
-	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << (odf.printType ? "[UINT] " : "") << *ptr; }
-	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << (odf.printType ? "[LONG] " : "") << *ptr; }
-	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << (odf.printType ? "[ULONG] " : "") << *ptr; }
-	if (auto ptr = std::get_if<float>(&odf.content)) { out << (odf.printType ? "[FLOAT] " : "") << *ptr; }
-	if (auto ptr = std::get_if<double>(&odf.content)) { out << (odf.printType ? "[DOUBLE] " : "") << *ptr; }
-	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << (odf.printType ? "[CSTR] " : "") << *ptr; }
-	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << (odf.printType ? "[WSTR] " : "") << *ptr; }
+	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << (odf.printType ? "[BYTE] " : "") << (signed short)*ptr << "\n"; }
+	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << (odf.printType ? "[UBYTE] " : "") << (signed short)*ptr << "\n"; }
+	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << (odf.printType ? "[SHORT] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << (odf.printType ? "[USHORT] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << (odf.printType ? "[INT] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << (odf.printType ? "[UINT] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << (odf.printType ? "[LONG] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << (odf.printType ? "[ULONG] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<float>(&odf.content)) { out << (odf.printType ? "[FLOAT] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<double>(&odf.content)) { out << (odf.printType ? "[DOUBLE] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << (odf.printType ? "[CSTR] " : "") << *ptr << "\n"; }
+	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << (odf.printType ? "[WSTR] " : "") << *ptr << "\n"; }
 	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { out << (odf.printType ? "[OBJ] " : "") << *ptr; }
 	if (auto ptr = std::get_if<ODF::List>(&odf.content)) { out << (odf.printType ? "[LIST] " : "") << *ptr; }
 	return out;
@@ -444,7 +465,7 @@ bool operator==(const ODF& odf1, const ODF& odf2)
 	if (odf1.type != odf2.type) // check type, size and content headers
 		return false;
 
-	switch (odf1.getVariantType())
+ 	switch (odf1.getVariantType())
 	{
 	case ODF::VT_INT8: return std::get<INT_8>(odf1.content) == std::get<INT_8>(odf2.content);
 	case ODF::VT_UINT8: return std::get<UINT_8>(odf1.content) == std::get<UINT_8>(odf2.content);
@@ -751,14 +772,12 @@ ODF& ODF::operator[](size_t index)
 	return std::get<List>(content)[index];
 }
 
-ODF& ODF::operator[](const std::string& key)
+ODF& ODF::operator[](std::string_view key)
 {
-	return std::get<Object>(content)[key];
-}
-
-ODF& ODF::operator[](const char* key)
-{
-	return operator[](std::string(key));
+	if (auto ptr = std::get_if<Object>(&content))
+		return ptr->operator[](key.data());
+	makeObject();
+	return std::get<Object>(content)[key.data()];
 }
 
 ODF& ODF::operator=(const ODF& other)
@@ -1758,7 +1777,7 @@ ODF::Type::Type(const Type& other) : complexSpec(nullptr), immutable(false)
 	*this = other;
 }
 
-ODF::Type::Type(Type&& type)
+ODF::Type::Type(Type&& type) noexcept
 {
 	this->immutable = type.immutable;
 	this->complexSpec = type.complexSpec;
@@ -2312,12 +2331,24 @@ ODF::Status::Status(Value val)
 
 void ODF::push_back(const ODF& odf)
 {
-	std::get<List>(content).push_back(odf);
+	try {
+		std::get<List>(content).push_back(odf);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<List>().push_back(odf);
+	}
 }
 
 void ODF::push_front(const ODF& odf)
 {
-	std::get<List>(content).push_front(odf);
+	try {
+		std::get<List>(content).push_front(odf);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<List>().push_front(odf);
+	}
 }
 
 void ODF::erase(size_t index)
@@ -2337,7 +2368,13 @@ void ODF::erase_range(size_t from, size_t to)
 
 void ODF::insert(size_t where, const ODF& odf)
 {
-	std::get<List>(content).insert(where, odf);
+	try {
+		std::get<List>(content).insert(where, odf);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<List>().insert(where, odf);
+	}
 }
 
 std::optional<size_t> ODF::find(const ODF& odf)
@@ -2455,32 +2492,68 @@ void ODF::makeObject(const TypeSpecifier& elementType)
 
 void ODF::insert(const std::string& key, const ODF& odf)
 {
-	std::get<Object>(content).insert(key, odf);
+	try {
+		std::get<Object>(content).insert(key, odf);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<Object>().insert(key, odf);
+	}
 }
 
 void ODF::insert(const Pair& value)
 {
-	std::get<Object>(content).insert(value);
+	try {
+		std::get<Object>(content).insert(value);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<Object>().insert(value);
+	}
 }
 
 void ODF::insert(const std::map<std::string, ODF>& map)
 {
-	std::get<Object>(content).insert(map);
+	try {
+		std::get<Object>(content).insert(map);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<Object>().insert(map);
+	}
 }
 
 void ODF::insert(const std::unordered_map<std::string, ODF>& umap)
 {
-	std::get<Object>(content).insert(umap);
+	try {
+		std::get<Object>(content).insert(umap);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<Object>().insert(umap);
+	}
 }
 
 void ODF::insert(const std::vector<Pair>& pairs)
 {
-	std::get<Object>(content).insert(pairs);
+	try {
+		std::get<Object>(content).insert(pairs);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<Object>().insert(pairs);
+	}
 }
 
 void ODF::insert(const std::initializer_list<Pair>& pairs)
 {
-	std::get<Object>(content).insert(pairs);
+	try {
+		std::get<Object>(content).insert(pairs);
+	}
+	catch (std::bad_variant_access&)
+	{
+		content.emplace<Object>().insert(pairs);
+	}
 }
 
 void ODF::erase(const std::string& key)
@@ -2543,7 +2616,10 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 	if (fixType.type == TypeSpecifier::NULLTYPE) // if fixtype is NULL it will be set correctly
 		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
 	if (realType == fixType)
+	{
 		list.push_back(odf);
+		list.back().immutable(); // have this here, because the else block handles immutabillity seperately by recursively calling push_back
+	}
 	else
 	{
 		// try converting the element to the desired type
@@ -2555,7 +2631,6 @@ void ODF::List::FixedArray::push_back(const ODF& odf)
 			THROW TypeMismatch();
 		}
 	}
-	list.back().immutable();
 }
 
 void ODF::List::FixedArray::push_front(const ODF& odf)
@@ -2565,7 +2640,10 @@ void ODF::List::FixedArray::push_front(const ODF& odf)
 	if (fixType.type == TypeSpecifier::NULLTYPE) // if fixtype is NULL it will be set correctly
 		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
 	if (realType == fixType)
+	{
 		push_front(odf);
+		list.front().immutable(); // have this here, because the else block handles immutabillity seperately by recursively calling push_front
+	}
 	else
 	{
 		// try converting the element to the desired type
@@ -2577,7 +2655,6 @@ void ODF::List::FixedArray::push_front(const ODF& odf)
 			THROW TypeMismatch();
 		}
 	}
-	list.front().immutable();
 }
 
 void ODF::List::FixedArray::erase(size_t index)
@@ -2604,7 +2681,10 @@ void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 	if (fixType.type == TypeSpecifier::NULLTYPE) // if fixtype is NULL it will be set correctly
 		fixType = realType; // trigger next if statement. COmpiler will propably optimaize this out
 	if (realType == fixType)
+	{
 		list.insert(list.begin() + where, odf);
+		list[where + 1].immutable(); // where is the index of the elemet before the new elememt // have this here, because the else block handles immutabillity seperately by recursively calling insert
+	}
 	else
 	{
 		// try converting the element to the desired type
@@ -2616,7 +2696,6 @@ void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 			THROW TypeMismatch();
 		}
 	}
-	list[where + 1].type.makeImmutable(); // where is the index of the elemet before the new elememt
 }
 
 std::optional<size_t> ODF::List::FixedArray::find(const ODF& odf) const
@@ -3900,4 +3979,77 @@ ODF::List::Iterator ODF::List::MixedArray::end() noexcept
 std::vector<ODF>& ODF::List::MixedArray::getArrayContainer()
 {
 	return list;
+}
+
+void ODF::PoolCollection::addImportPool(Pool pool)
+{
+	importPools.push_back(pool);
+}
+
+void ODF::PoolCollection::addExportPool(Pool pool)
+{
+	exportPools.push_back(pool);
+}
+
+void ODF::PoolCollection::addPool(Pool pool)
+{
+	importPools.push_back(pool);
+	exportPools.push_back(pool);
+}
+
+std::optional<ODF::Type> ODF::PoolCollection::importType(size_t id) const
+{
+	// search all pools for this type and return it.
+	for (const Pool& it : importPools)
+	{
+		try {
+			return it->at(id);
+		}
+		catch (std::out_of_range&) {} // continue if element not found
+	}
+	// element not found
+	return std::nullopt;
+}
+
+void ODF::PoolCollection::exportType(size_t id, const Type& type)
+{
+	// add the type to all exportPools
+	for (Pool& it : exportPools)
+		it->insert(std::make_pair(id, type));
+}
+
+void ODF::PoolCollection::exportType(const std::pair<size_t, const Type&>& pair)
+{
+	for (Pool& it : exportPools)
+		it->insert(pair);
+}
+
+ODF::Pool ODF::PoolCollection::operator=(Pool pool)
+{
+	importPools.clear();
+	exportPools.clear();
+	addPool(pool);
+	return pool;
+}
+
+ODF::Pool ODF::PoolCollection::operator+=(Pool pool)
+{
+	addPool(pool);
+	return pool;
+}
+
+ODF::PoolCollection::PoolCollection(Pool pool)
+{
+	addPool(pool);
+}
+
+ODF::PoolCollection::PoolCollection(Pool importPool, Pool exportPool)
+{
+	addImportPool(importPool);
+	addExportPool(exportPool);
+}
+
+ODF::Pool ODF::PoolCollection::makePool()
+{
+	return std::make_shared<PoolType>();
 }
