@@ -79,18 +79,19 @@ public:
 	{
 		InvalidTypeMutation(const std::string& message = "InvalidTypeMutation exception");
 	};
-
-
-	// random constants
-	static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
-
-	// Specifiers
-	struct DF_API Type;
+	// Thrown if an type imported by "import" is not found
+	struct DF_API UnresolvedImport : public std::runtime_error
+	{
+		UnresolvedImport(const std::string& message = "UnresovledImport exception");
+	};
 
 	struct DF_API Status
 	{
 		enum Value {
 			Ok = 0,
+			Virtual, // the type that was loaded was a virtual type, and therefor the type needs to be loaded again, if available
+			InvalidLocalTypeID, // the local type wasn't found.
+			InvalidTypeImport, // the typeid that was requested to be imported wasn't found
 			TypeMismatch,
 			FileOpenError,
 			RWError,
@@ -108,11 +109,52 @@ public:
 		Status(Value val = Status::Ok);
 	};
 
+
+	struct Type;
+	typedef std::unordered_map<size_t, Type> PoolType;
+	typedef std::shared_ptr<PoolType> Pool;
+	class DF_API PoolCollection
+	{
+	public:
+		std::vector<Pool> importPools; // pools from which types are imported
+		std::vector<Pool> exportPools; // pools from which types are exported
+
+		void addImportPool(Pool pool);
+		void addExportPool(Pool pool);
+		void addPool(Pool pool); // adds as both inport and export
+
+		std::optional<Type> importType(size_t id) const; // searches the input pools
+		void exportType(size_t id, const Type& type);
+		void exportType(const std::pair<size_t, const Type&>& pair);
+
+		std::optional<Type> parse(MemoryDataStream& mem, PoolType& localPool); // working on it
+		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
+		static size_t getFullTypeID(UINT_32 id, bool replacesOldID);
+		static std::pair<UINT_32, bool> makeFullTypeID(size_t fullTypeID);
+
+		Pool operator=(Pool pool); // clears all pools, then adds 'pool' as both import and export
+		Pool operator+=(Pool pool); // adds 'pool' as both import and export
+
+		PoolCollection() = default;
+		PoolCollection(Pool pool); // adds 'pool' as import and export
+		PoolCollection(Pool importPool, Pool exportPool);
+
+		// create a new pool
+		static Pool makePool(); // destroyed automatically by shared_ptr
+	};
+
+	std::optional<PoolType> localPool; // file scope. only created for the root element
+
+	// random constants
+	//static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
+
+	// Specifiers
+
 	class DF_API AbstractDataObject
 	{
 	public:
 		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
-		virtual void loadFromMemory(MemoryDataStream& mem) = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) = 0;
 	};
 
 	class DF_API TypeSpecifier : public AbstractDataObject // The size specifier specifier is removed automatically when impicitely used.
@@ -130,9 +172,11 @@ public:
 		inline bool isList() const;
 		inline Type smallType() const;
 		inline Type withoutSSS() const; // without size specifier specifier
+		bool isVirtual() const;
+		static bool isVirtual(unsigned char type);
 
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
 
 		operator Type() const;
 		TypeSpecifier& operator=(unsigned char byte);
@@ -151,6 +195,8 @@ public:
 		static constexpr Type FLAG_MIXED = 0b0010'0000;
 		static constexpr Type FLAG_UNSIGNED = 0b0010'0000;
 		static constexpr Type FLAG_HIGH_PREC = 0b0010'0000;
+		static constexpr Type FLAG_RENAMED = 0b0010'0000;
+		static constexpr Type FLAG_USETYPE = 0b0010'0000;
 		static constexpr Type FLAG_LOW_PREC = 0;
 		static constexpr Type FLAG_NULL = 0;
 		static constexpr Type FLAG_BYTE = 1;
@@ -161,6 +207,9 @@ public:
 		static constexpr Type FLAG_STRING = 6;
 		static constexpr Type FLAG_OBJ = 7;
 		static constexpr Type FLAG_LIST = 8;
+		static constexpr Type FLAG_VTYPE = 9;
+		static constexpr Type FLAG_EXPORT = 0xA;
+		static constexpr Type FLAG_IMPORT = 0xB;
 		static constexpr Type NULLTYPE = FLAG_NULL;
 		static constexpr Type UNDEFINED = FLAG_NULL | FLAG_MIXED;
 		static constexpr Type BYTE = FLAG_BYTE;
@@ -179,6 +228,12 @@ public:
 		static constexpr Type MXOBJ = FLAG_OBJ | FLAG_MIXED;
 		static constexpr Type FXLIST = FLAG_LIST;
 		static constexpr Type MXLIST = FLAG_LIST | FLAG_MIXED;
+		static constexpr Type DEFTYPE = FLAG_VTYPE;
+		static constexpr Type USETYPE = FLAG_VTYPE | FLAG_USETYPE;
+		static constexpr Type EXPORT = FLAG_EXPORT;
+		static constexpr Type EXPORTAS = FLAG_EXPORT | FLAG_RENAMED;
+		static constexpr Type IMPORT = FLAG_IMPORT;
+		static constexpr Type IMPORTAS = FLAG_IMPORT | FLAG_RENAMED;
 	};
 
 	struct DF_API SizeSpecifier : public AbstractDataObject
@@ -195,7 +250,7 @@ public:
 		void load(MemoryDataStream& stream, TypeSpecifier type);
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
 		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
-		void loadFromMemory(MemoryDataStream& mem) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
 		SizeSpecifier();
 	};
 
@@ -246,7 +301,7 @@ public:
 		void readTypeSpecifier(MemoryDataStream& mem); // loads the type specifier from a stream and performs mutation check
 		void clear(); // deletes every optional specifier
 		Status saveToMemory(MemoryDataStream& mem) const;
-		Status loadFromMemory(MemoryDataStream& mem);
+		Status loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools);
 		void setType(TypeSpecifier type); // use this, otherwise the object might throw exceptions or undefined behaiviour on save // TODO
 		inline bool isPrimitive() const; // True if no specifies other than TypeSpecifier are needed // TODO
 		inline bool needsObjectSpecifier() const;
@@ -288,6 +343,7 @@ public:
 		TypeSpecifier operator=(TypeSpecifier type);
 
 		Type();
+		Type(MemoryDataStream& mem, std::optional<ODF::PoolCollection> pools); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails.
 		Type(const Type& other);
 		Type(Type&& type) noexcept;
 		Type(TypeSpecifier type);
@@ -303,7 +359,7 @@ public:
 		SizeSpecifier size;
 		Type fixType; // always holds a value, is just a pointer because of the forward declaring
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
 	};
 
 	struct DF_API MixedArraySpecifier : public AbstractDataObject
@@ -311,7 +367,7 @@ public:
 		std::vector<Type> types;
 
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
 	};
 
 	struct DF_API FixedObjectSpecifier : public AbstractDataObject
@@ -319,7 +375,7 @@ public:
 		Type fixType;
 		std::vector<std::string> keys;
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
 	};
 
 	struct DF_API MixedObjectSpecifier : public AbstractDataObject
@@ -327,7 +383,7 @@ public:
 		typedef const std::pair<std::string, Type>& ObjectIterator;
 		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
 	};
 
 	// Complex data object functions
@@ -797,6 +853,14 @@ public:
 
 	// Interface
 
+	// Pool interface: do not use pools by default to increase performance on temporarily created objects or if they aren't needed.
+	std::optional<PoolCollection> pools;
+	void usePools(); // creates a valid value in the optional
+	void addPool(Pool pool);
+	void addImportPool(Pool pool);
+	void addExportPool(Pool pool);
+	Pool operator+=(Pool pool); // adds the pool as import and export pool
+
 	// operator=
 	ODF& operator=(const ODF& other); // copy
 	// primitive types
@@ -1009,9 +1073,9 @@ public:
 	friend bool operator== (const ODF& odf1, const ODF& odf2); // TODO
 
 	// load and save functions
-	Status saveToMemory(MemoryDataStream& mem) const;
+	Status saveToMemory(MemoryDataStream& mem) const; // main save function
 	Status saveToMemory(char* destination, size_t size) const;
-	Status loadFromMemory(MemoryDataStream& mem);
+	Status loadFromMemory(MemoryDataStream& mem); // main load function
 	Status loadFromMemory(const char* data, size_t size);
 
 	Status saveToFile(std::string file);
@@ -1034,33 +1098,6 @@ public:
 
 	static ComplexExplicitor::OBJSTRUCT __MOBJ;
 	static ComplexExplicitor::FOBJSTRUCT __FOBJ;
-
-	typedef std::unordered_map<size_t, Type> PoolType;
-	typedef std::shared_ptr<PoolType> Pool;
-	class DF_API PoolCollection
-	{
-	public:
-		std::vector<Pool> importPools; // pools from which types are imported
-		std::vector<Pool> exportPools; // pools from which types are exported
-
-		void addImportPool(Pool pool);
-		void addExportPool(Pool pool);
-		void addPool(Pool pool); // adds as both inport and export
-
-		std::optional<Type> importType(size_t id) const; // searches the input pools
-		void exportType(size_t id, const Type& type);
-		void exportType(const std::pair<size_t, const Type&>& pair);
-
-		Pool operator=(Pool pool); // clears all pools, then adds 'pool' as both import and export
-		Pool operator+=(Pool pool); // adds 'pool' as both import and export
-
-		PoolCollection() = default;
-		PoolCollection(Pool pool); // adds 'pool' as import and export
-		PoolCollection(Pool importPool, Pool exportPool);
-
-		// create a new pool
-		static Pool makePool(); // destroyed automatically by shared_ptr
-	};
 };
 
 using std::literals::string_literals::operator""s;

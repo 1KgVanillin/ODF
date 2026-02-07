@@ -34,39 +34,37 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 
 int main()
 {
-	// goal:
-	// odf = {
-	//   { "key", value },
-	//   { "key2", value2 }
-	// } in fixed and mixed (detected at consutruction)
-	// odf = map / unordered_map
-
 	try {
 
-		ODF odf = 5;
+		// Data type test code
+		//ODF odf = 5;
 
-		cout << "start:\n" << odf << "\n";
+		//cout << "start:\n" << odf << "\n";
 
-		odf["penis"s] = 6;
+		//odf["penis"s] = 6;
 
-		char data[10000] = {};
-		memset(data, 1, 100);
-		MemoryDataStream write(data, 10000);
-		if (odf.saveToMemory(write) != ODF::Status::Ok)
-			cout << "penis\n";
+		//char data[10000] = {};
+		//memset(data, 1, 100);
+		//MemoryDataStream write(data, 10000);
+		//if (odf.saveToMemory(write) != ODF::Status::Ok)
+		//	cout << "penis\n";
 
-		ODF o2;
-		o2.loadFromMemory(data, 10000); // BUG: THe load from memory function produces an invalid object. That means that the ODF::Type and the std::variat::index
-		// doesn't actually match, which is why operator== throws a std::bad_variant_access
+		//ODF o2;
+		//o2.loadFromMemory(data, 10000); // BUG: THe load from memory function produces an invalid object. That means that the ODF::Type and the std::variat::index
+		//// doesn't actually match, which is why operator== throws a std::bad_variant_access
 
-		cout << "\n\nresult:\n" << odf << "---\n" << o2 << "\n\n";
+		//cout << "\n\nresult:\n" << odf << "---\n" << o2 << "\n\n";
 
-		if (odf.size() != o2.size())
-			cout << "size mismatch\n";
+		//if (odf.size() != o2.size())
+		//	cout << "size mismatch\n";
 
-		cout << "equal: " << std::boolalpha << (odf == o2) << "\n\n\n";
+		//cout << "equal: " << std::boolalpha << (odf == o2) << "\n\n\n";
 
-		return 0;
+		//return 0;
+
+		// VTYPE test code
+		ODF odf;
+
 	}
 	catch (std::runtime_error& err)
 	{

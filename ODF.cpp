@@ -31,7 +31,7 @@ void ODF::Type::checkImmutable() const
 void ODF::Type::readTypeSpecifier(MemoryDataStream& mem)
 {
 	checkImmutable();
-	*this = mem.readTypeSpecifier<unsigned char>();
+	*this = mem.read<unsigned char>();
 }
 
 ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
@@ -93,12 +93,20 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem) const
 	return Status::Ok;
 }
 
-ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
+ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
 	destroyComplexSpec(); // destroy the last complexSpec if the object was already in use
 
+	// check for virtual types
+	unsigned char vtype = mem.peek();
+	if (TypeSpecifier::isVirtual(vtype))
+	{
+
+		return Status::Virtual;
+	}
+
 	// load primitive type specifier, to allow isFixed() check
-	readTypeSpecifier(mem); // prio 1
+	else readTypeSpecifier(mem); // prio 1
 	bool obj = type.isObject();
 	bool list = type.isList();
 	bool fixed = type.isFixed();
@@ -116,13 +124,13 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 		if (fixed)
 		{
 			FixedArraySpecifier& flistSpec = listSpec.emplace<FixedArraySpecifier>();
-			flistSpec.loadFromMemory(mem);
+			flistSpec.loadFromMemory(mem, pools);
 			return Status::Ok;
 		}
 		else if (mixed)
 		{
 			MixedArraySpecifier& mlistSpec = listSpec.emplace<MixedArraySpecifier>();
-			mlistSpec.loadFromMemory(mem);
+			mlistSpec.loadFromMemory(mem, pools);
 			return Status::Ok;
 		}
 	}
@@ -132,13 +140,13 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem)
 		if (fixed)
 		{
 			FixedObjectSpecifier& fobjSpec = objSpec.emplace<FixedObjectSpecifier>();
-			fobjSpec.loadFromMemory(mem); // already handles all loading
+			fobjSpec.loadFromMemory(mem, pools); // already handles all loading
 			return Status::Ok;
 		}
 		else if (mixed)
 		{
 			MixedObjectSpecifier& mobjSpec = objSpec.emplace<MixedObjectSpecifier>();
-			mobjSpec.loadFromMemory(mem);
+			mobjSpec.loadFromMemory(mem, pools);
 			return Status::Ok;
 		}
 	}
@@ -1772,6 +1780,15 @@ ODF::TypeSpecifier ODF::Type::operator=(TypeSpecifier type)
 
 ODF::Type::Type() : complexSpec(nullptr), immutable(false) {}
 
+ODF::Type::Type(MemoryDataStream& mem, std::optional<ODF::PoolCollection> pools)
+{
+	Status error = this->loadFromMemory(mem, pools);
+	if (error)
+	{
+		THROW error;
+	}
+}
+
 ODF::Type::Type(const Type& other) : complexSpec(nullptr), immutable(false)
 {
 	*this = other;
@@ -1859,7 +1876,7 @@ void ODF::MixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 	mem.write<UINT_8>(0);
 }
 
-void ODF::MixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem)
+void ODF::MixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
 	properties.clear();
 	std::string key;
@@ -1868,7 +1885,7 @@ void ODF::MixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem)
 	{
 		key = mem.readStr();
 		Type type;
-		type.loadFromMemory(mem);
+		type.loadFromMemory(mem, pools);
 		properties[key] = type;
 	}
 	mem.skip(); // skip null terminator that was peeked in the header of the while loop
@@ -1892,13 +1909,13 @@ void ODF::FixedObjectSpecifier::saveToMemory(MemoryDataStream& mem) const
 	mem.write<UINT_8>(0);
 }
 
-void ODF::FixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem)
+void ODF::FixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
 	// prepare object for reading
 	keys.clear();
 	
 	// load header
-	fixType.loadFromMemory(mem);
+	fixType.loadFromMemory(mem, pools);
 
 	// read keys until a null terminator
 	while (mem.peek())
@@ -1931,16 +1948,16 @@ void ODF::SizeSpecifier::load(MemoryDataStream& mem, TypeSpecifier type)
 	switch (type.operator unsigned char() >> 6) // looks cursed
 	{
 	case 0b00:
-		actualSize = mem.readTypeSpecifier<UINT_8>();
+		actualSize = mem.read<UINT_8>();
 		return;
 	case 0b01:
-		actualSize = mem.readTypeSpecifier<UINT_16>();
+		actualSize = mem.read<UINT_16>();
 		return;
 	case 0b10:
-		actualSize = mem.readTypeSpecifier<UINT_32>();
+		actualSize = mem.read<UINT_32>();
 		return;
 	case 0b11:
-		actualSize = mem.readTypeSpecifier<UINT_64>();
+		actualSize = mem.read<UINT_64>();
 		return;
 	}
 }
@@ -1971,7 +1988,7 @@ void ODF::SizeSpecifier::saveToMemory(MemoryDataStream& mem) const
 	saveToMemory(mem, sizeSpecifierSpecifier());
 }
 
-void ODF::SizeSpecifier::loadFromMemory(MemoryDataStream& mem)
+void ODF::SizeSpecifier::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
 	load(mem, mem.peekPrevious());
 }
@@ -2005,7 +2022,10 @@ ODF::Status ODF::saveToMemory(char* destination, size_t size) const
 
 ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 {
-	if (Status error = type.loadFromMemory(mem))
+	// pools only need to be passed to the type loading, of this element and all of its childs, as that are all types of this translation unit.
+	// pools are not needed in loadBody, as they are only linking types.
+
+	if (Status error = type.loadFromMemory(mem, pools))
 		return error;
 
 	return loadBody(mem);
@@ -2105,14 +2125,24 @@ inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::withoutSSS() const
 	return type & 0b00'111111;
 }
 
+bool ODF::TypeSpecifier::isVirtual() const
+{
+	return isVirtual(type);
+}
+
+bool ODF::TypeSpecifier::isVirtual(unsigned char type)
+{
+	return (type == DEFTYPE) || (type == IMPORT) || (type == USETYPE) || (type == EXPORT);
+}
+
 void ODF::TypeSpecifier::saveToMemory(MemoryDataStream& mem) const
 {
 	mem.write(type);
 }
 
-void ODF::TypeSpecifier::loadFromMemory(MemoryDataStream& mem)
+void ODF::TypeSpecifier::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
-	*this = mem.readTypeSpecifier<Type>();
+	*this = mem.read<Type>();
 }
 
 inline bool ODF::Type::isMixed() const
@@ -2227,34 +2257,34 @@ ODF::Status ODF::loadBody(MemoryDataStream& mem)
 	switch (type.getVariantType())
 	{
 	case VT_INT8:
-		content = mem.readTypeSpecifier<INT_8>();
+		content = mem.read<INT_8>();
 		return Status::Ok;
 	case VT_UINT8:
-		content = mem.readTypeSpecifier<UINT_8>();
+		content = mem.read<UINT_8>();
 		return Status::Ok;
 	case VT_INT16:
-		content = mem.readTypeSpecifier<INT_16>();
+		content = mem.read<INT_16>();
 		return Status::Ok;
 	case VT_UINT16:
-		content = mem.readTypeSpecifier<UINT_16>();
+		content = mem.read<UINT_16>();
 		return Status::Ok;
 	case VT_INT32:
-		content = mem.readTypeSpecifier<INT_32>();
+		content = mem.read<INT_32>();
 		return Status::Ok;
 	case VT_UINT32:
-		content = mem.readTypeSpecifier<UINT_32>();
+		content = mem.read<UINT_32>();
 		return Status::Ok;
 	case VT_INT64:
-		content = mem.readTypeSpecifier<INT_64>();
+		content = mem.read<INT_64>();
 		return Status::Ok;
 	case VT_UINT64:
-		content = mem.readTypeSpecifier<UINT_64>();
+		content = mem.read<UINT_64>();
 		return Status::Ok;
 	case VT_FLOAT:
-		content = mem.readTypeSpecifier<float>();
+		content = mem.read<float>();
 		return Status::Ok;
 	case VT_DOUBLE:
-		content = mem.readTypeSpecifier<double>();
+		content = mem.read<double>();
 		return Status::Ok;
 	case VT_CSTR:
 		content = mem.readStr();
@@ -3391,10 +3421,10 @@ void ODF::FixedArraySpecifier::saveToMemory(MemoryDataStream& mem) const
 	fixType.saveToMemory(mem);
 }
 
-void ODF::FixedArraySpecifier::loadFromMemory(MemoryDataStream& mem)
+void ODF::FixedArraySpecifier::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
-	size.loadFromMemory(mem);
-	fixType.loadFromMemory(mem);
+	size.loadFromMemory(mem, pools);
+	fixType.loadFromMemory(mem, pools);
 }
 
 ODF::SixSeven::SixSeven(const std::string& message) : runtime_error(message) {}
@@ -3408,13 +3438,13 @@ void ODF::MixedArraySpecifier::saveToMemory(MemoryDataStream& mem) const
 	mem.write(0ui8); // NULLTYPE
 }
 
-void ODF::MixedArraySpecifier::loadFromMemory(MemoryDataStream& mem)
+void ODF::MixedArraySpecifier::loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools)
 {
 	// load types until a NULL type is found
 	while (mem.peek()) // next read type is not NULL
 	{
 		Type type;
-		type.loadFromMemory(mem);
+		type.loadFromMemory(mem, pools);
 		types.push_back(type);
 	}
 	mem.skip(); // skip null terminator
@@ -3991,6 +4021,31 @@ void ODF::PoolCollection::addExportPool(Pool pool)
 	exportPools.push_back(pool);
 }
 
+void ODF::usePools()
+{
+	pools.emplace();
+}
+
+void ODF::addPool(Pool pool)
+{
+	pools.value().addPool(pool);
+}
+
+void ODF::addImportPool(Pool pool)
+{
+	pools.value().addImportPool(pool);
+}
+
+void ODF::addExportPool(Pool pool)
+{
+	pools.value().addExportPool(pool);
+}
+
+ODF::Pool ODF::operator+=(Pool pool)
+{
+	addPool(pool);
+}
+
 void ODF::PoolCollection::addPool(Pool pool)
 {
 	importPools.push_back(pool);
@@ -4024,6 +4079,190 @@ void ODF::PoolCollection::exportType(const std::pair<size_t, const Type&>& pair)
 		it->insert(pair);
 }
 
+std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolType& localPool)
+{
+	// parse the virtual type and return it. Only USETYPE returns a type, all other virtaul types must be callable without a body, so they do not return a type
+	unsigned char vtype = mem.read();
+	Type type;
+
+	using TS = TypeSpecifier;
+	switch (vtype)
+	{
+	case TS::DEFTYPE:
+		// errors from the constructor are handled as exceptions, which aren't caught, as this function also handles error by throwing
+		switch (getVTypeSizeSpec(vtype))
+		{
+		case 0:
+			localPool[getFullTypeID(mem.read<UINT_8>(), true)] = Type(mem, *this);
+			return std::nullopt;
+		case 1:
+			localPool[getFullTypeID(mem.read<UINT_8>(), false)] = Type(mem, *this);
+			return std::nullopt;
+		case 2:
+			localPool[getFullTypeID(mem.read<UINT_16>(), false)] = Type(mem, *this);
+			return std::nullopt;
+		case 3:
+			localPool[getFullTypeID(mem.read<UINT_32>(), false)] = Type(mem, *this);
+			return std::nullopt;
+		}
+
+	case TS::USETYPE:
+		try
+		{
+			switch (getVTypeSizeSpec(vtype))
+			{
+			case 0:
+				return localPool.at(getFullTypeID(mem.read<UINT_8>(), true));
+			case 1:
+				return localPool.at(getFullTypeID(mem.read<UINT_8>(), false));
+			case 2:
+				return localPool.at(getFullTypeID(mem.read<UINT_16>(), false));
+			case 3:
+				return localPool.at(getFullTypeID(mem.read<UINT_32>(), false));
+			}
+		}
+		catch (std::out_of_range&)
+		{
+			THROW Status::InvalidLocalTypeID;
+		}
+
+	case TS::EXPORT:
+		try
+		{
+			switch (getVTypeSizeSpec(vtype))
+			{
+			case 0:
+				size_t typeID = getFullTypeID(mem.read<UINT_8>(), true);
+				exportType(typeID, localPool.at(typeID));
+				return std::nullopt;
+			case 1:
+				size_t typeID = getFullTypeID(mem.read<UINT_8>(), false);
+				exportType(typeID, localPool.at(typeID));
+				return std::nullopt;
+			case 2:
+				size_t typeID = getFullTypeID(mem.read<UINT_16>(), false);
+				exportType(typeID, localPool.at(typeID));
+				return std::nullopt;
+			case 3:
+				size_t typeID = getFullTypeID(mem.read<UINT_32>(), false);
+				exportType(typeID, localPool.at(typeID));
+				return std::nullopt;
+			}
+		}
+		catch (std::out_of_range&)
+		{
+			THROW Status::InvalidLocalTypeID;
+		}
+	case TS::EXPORTAS:
+		try
+		{
+			switch (getVTypeSizeSpec(vtype))
+			{
+			case 0:
+				size_t localID = getFullTypeID(mem.read<UINT_8>(), true);
+				size_t globalID = getFullTypeID(mem.read<UINT_8>(), true);
+				exportType(globalID, localPool.at(localID));
+				return std::nullopt;
+			case 1:
+				size_t localID = getFullTypeID(mem.read<UINT_8>(), false);
+				size_t globalID = getFullTypeID(mem.read<UINT_8>(), false);
+				exportType(globalID, localPool.at(localID));
+				return std::nullopt;
+			case 2:
+				size_t localID = getFullTypeID(mem.read<UINT_16>(), false);
+				size_t globalID = getFullTypeID(mem.read<UINT_16>(), false);
+				exportType(globalID, localPool.at(localID));
+				return std::nullopt;
+			case 3:
+				size_t localID = getFullTypeID(mem.read<UINT_32>(), false);
+				size_t globalID = getFullTypeID(mem.read<UINT_32>(), false);
+				exportType(globalID, localPool.at(localID));
+				return std::nullopt;
+			}
+		}
+		catch (std::out_of_range&)
+		{
+			THROW Status::InvalidLocalTypeID;
+		}
+	case TS::IMPORT:
+		try
+		{
+			switch (getVTypeSizeSpec(vtype))
+			{
+			case 0:
+				size_t typeID = getFullTypeID(mem.read<UINT_8>(), true);
+				localPool[typeID] = importType(typeID).value();
+				return std::nullopt;
+			case 1:
+				size_t typeID = getFullTypeID(mem.read<UINT_8>(), false);
+				localPool[typeID] = importType(typeID).value();
+				return std::nullopt;
+			case 2:
+				size_t typeID = getFullTypeID(mem.read<UINT_16>(), false);
+				localPool[typeID] = importType(typeID).value();
+				return std::nullopt;
+			case 3:
+				size_t typeID = getFullTypeID(mem.read<UINT_32>(), false);
+				localPool[typeID] = importType(typeID).value();
+				return std::nullopt;
+			}
+		}
+		catch (std::bad_optional_access&)
+		{
+			THROW Status::InvalidLocalTypeID;
+		}
+	case TS::IMPORTAS:
+		try
+		{
+			switch (getVTypeSizeSpec(vtype))
+			{
+			case 0:
+				size_t globalID = getFullTypeID(mem.read<UINT_8>(), true);
+				size_t localID = getFullTypeID(mem.read<UINT_8>(), true);
+				localPool[localID] = importType(globalID).value();
+				return std::nullopt;
+			case 1:
+				size_t globalID = getFullTypeID(mem.read<UINT_8>(), false);
+				size_t localID = getFullTypeID(mem.read<UINT_8>(), false);
+				localPool[localID] = importType(globalID).value();
+				return std::nullopt;
+			case 2:
+				size_t globalID = getFullTypeID(mem.read<UINT_16>(), false);
+				size_t localID = getFullTypeID(mem.read<UINT_16>(), false);
+				localPool[localID] = importType(globalID).value();
+				return std::nullopt;
+			case 3:
+				size_t globalID = getFullTypeID(mem.read<UINT_32>(), false);
+				size_t localID = getFullTypeID(mem.read<UINT_32>(), false);
+				localPool[localID] = importType(globalID).value();
+				return std::nullopt;
+			}
+		}
+		catch (std::bad_optional_access&)
+		{
+			THROW Status::InvalidLocalTypeID;
+		}
+	default:
+		return std::nullopt;
+	}
+}
+
+unsigned char ODF::PoolCollection::getVTypeSizeSpec(unsigned char vtype)
+{
+	return vtype >> 6;
+}
+
+size_t ODF::PoolCollection::getFullTypeID(UINT_32 id, bool replacesOldID)
+{
+	// return id if replacesOldID is false. return id | 0xFF00'0000'0000'0000
+	return replacesOldID ? id : (id | 0xFF00'0000'0000'0000);
+}
+
+std::pair<UINT_32, bool> ODF::PoolCollection::makeFullTypeID(size_t fullTypeID)
+{
+	return std::make_pair(static_cast<UINT_32>(fullTypeID) & 0xFFFF'FFFF, fullTypeID & 0xFF00'0000'0000'0000);
+}
+
 ODF::Pool ODF::PoolCollection::operator=(Pool pool)
 {
 	importPools.clear();
@@ -4053,3 +4292,5 @@ ODF::Pool ODF::PoolCollection::makePool()
 {
 	return std::make_shared<PoolType>();
 }
+
+ODF::UnresolvedImport::UnresolvedImport(const std::string& message) : runtime_error(message) {}

@@ -19,7 +19,7 @@ class DF_API MemoryDataStream
 			write((char*)&data, sizeof(T));
 		}
 		void write(const char* data, size_t size);
-		void readTypeSpecifier(size_t startindex, char* dest, size_t size); // just in case manual access is needed.
+		void read(size_t startindex, char* dest, size_t size); // just in case manual access is needed.
 		size_t size() const;
 		const char* data() const;
 
@@ -98,17 +98,17 @@ public:
 	void skip(size_t numBytes = 1); // skip numBytes bytes
 	char peek();
 	void peek(char* destination, size_t size);
-	char readTypeSpecifier();
-	void readTypeSpecifier(char* destination, size_t size);
-	char* readTypeSpecifier(size_t size);
+	char read();
+	void read(char* destination, size_t size);
+	char* read(size_t size);
 	char* data();
 	size_t size();
 	size_t sizeLeft();
 	template<typename T>
-	T readTypeSpecifier()
+	T read()
 	{
 		T content{};
-		readTypeSpecifier((char*)&content, sizeof(content));
+		read((char*)&content, sizeof(content));
 		return content;
 	}
 	template<typename T>

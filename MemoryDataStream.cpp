@@ -274,7 +274,7 @@ void MemoryDataStream::DynamicAllocationMetadata::write(const char* data, size_t
 		vecdata.push_back(data[i]);
 }
 
-void MemoryDataStream::DynamicAllocationMetadata::readTypeSpecifier(size_t startindex, char* dest, size_t size)
+void MemoryDataStream::DynamicAllocationMetadata::read(size_t startindex, char* dest, size_t size)
 {
 	if (size > vecdata.size() - startindex)
 		throw AccessViolation("MemoryDataStream exceeded specified range (explicit read)");
@@ -286,9 +286,9 @@ std::string MemoryDataStream::readStr()
 {
 	std::string result;
 	while (peek()) // while the next byte is not a NULL terminator
-		result += readTypeSpecifier();
+		result += read();
 	// read last null terminator
-	readTypeSpecifier();
+	read();
 	// deobfuscate
 	if (obfuscated)
 		makeReadable(result);
@@ -299,9 +299,9 @@ std::wstring MemoryDataStream::readWstr()
 {
 	std::wstring result;
 	while (peek<wchar_t>())
-		result += readTypeSpecifier<wchar_t>();
+		result += read<wchar_t>();
 	// read last null terminator
-	readTypeSpecifier<wchar_t>();
+	read<wchar_t>();
 	// deobfuscate
 	if (obfuscated)
 		makeReadable(result);
@@ -337,7 +337,7 @@ char MemoryDataStream::peek()
 	throw AccessViolation("MemoryDataStream exceeded specified range. [peek()]");
 }
 
-char MemoryDataStream::readTypeSpecifier()
+char MemoryDataStream::read()
 {
 	if (current < firstInvalidAddress || insecure)
 		return *current++;
@@ -359,7 +359,7 @@ void MemoryDataStream::peek(char* destination, size_t size)
 	}
 }
 
-void MemoryDataStream::readTypeSpecifier(char* destination, size_t size)
+void MemoryDataStream::read(char* destination, size_t size)
 {
 	if (current + (size - 1) < firstInvalidAddress || insecure)
 	{
@@ -372,7 +372,7 @@ void MemoryDataStream::readTypeSpecifier(char* destination, size_t size)
 	}
 }
 
-char* MemoryDataStream::readTypeSpecifier(size_t size)
+char* MemoryDataStream::read(size_t size)
 {
 	if (current + (size - 1) < firstInvalidAddress || insecure)
 	{
