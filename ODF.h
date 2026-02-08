@@ -89,9 +89,11 @@ public:
 	{
 		enum Value {
 			Ok = 0,
-			Virtual, // the type that was loaded was a virtual type, and therefor the type needs to be loaded again, if available
+			Virtual, // the type that was loaded was virtual and not a USETYPE, so no type is returned. The parsing of the type was succesfull. Check available bytes in Input stream and load type again.
 			InvalidLocalTypeID, // the local type wasn't found.
 			InvalidTypeImport, // the typeid that was requested to be imported wasn't found
+			InvalidType,
+			NoPoolProvided, // The type is not a built but no pool to import it from is provided
 			TypeMismatch,
 			FileOpenError,
 			RWError,
@@ -154,7 +156,7 @@ public:
 	{
 	public:
 		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
-		virtual void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) = 0;
 	};
 
 	class DF_API TypeSpecifier : public AbstractDataObject // The size specifier specifier is removed automatically when impicitely used.
@@ -174,9 +176,10 @@ public:
 		inline Type withoutSSS() const; // without size specifier specifier
 		bool isVirtual() const;
 		static bool isVirtual(unsigned char type);
+		static bool isBuiltIn(unsigned char type);
 
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
 
 		operator Type() const;
 		TypeSpecifier& operator=(unsigned char byte);
@@ -234,6 +237,7 @@ public:
 		static constexpr Type EXPORTAS = FLAG_EXPORT | FLAG_RENAMED;
 		static constexpr Type IMPORT = FLAG_IMPORT;
 		static constexpr Type IMPORTAS = FLAG_IMPORT | FLAG_RENAMED;
+		static constexpr Type LAST_SPEC = IMPORT; // last spec that doesn't use extra bit
 	};
 
 	struct DF_API SizeSpecifier : public AbstractDataObject
@@ -250,7 +254,7 @@ public:
 		void load(MemoryDataStream& stream, TypeSpecifier type);
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
 		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
 		SizeSpecifier();
 	};
 
@@ -301,7 +305,7 @@ public:
 		void readTypeSpecifier(MemoryDataStream& mem); // loads the type specifier from a stream and performs mutation check
 		void clear(); // deletes every optional specifier
 		Status saveToMemory(MemoryDataStream& mem) const;
-		Status loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools);
+		Status loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool);
 		void setType(TypeSpecifier type); // use this, otherwise the object might throw exceptions or undefined behaiviour on save // TODO
 		inline bool isPrimitive() const; // True if no specifies other than TypeSpecifier are needed // TODO
 		inline bool needsObjectSpecifier() const;
@@ -343,7 +347,7 @@ public:
 		TypeSpecifier operator=(TypeSpecifier type);
 
 		Type();
-		Type(MemoryDataStream& mem, std::optional<ODF::PoolCollection> pools); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails.
+		Type(MemoryDataStream& mem, std::optional<ODF::PoolCollection> pools, std::optional<PoolType>& localPool); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails.
 		Type(const Type& other);
 		Type(Type&& type) noexcept;
 		Type(TypeSpecifier type);
@@ -359,7 +363,7 @@ public:
 		SizeSpecifier size;
 		Type fixType; // always holds a value, is just a pointer because of the forward declaring
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
 	};
 
 	struct DF_API MixedArraySpecifier : public AbstractDataObject
@@ -367,7 +371,7 @@ public:
 		std::vector<Type> types;
 
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
 	};
 
 	struct DF_API FixedObjectSpecifier : public AbstractDataObject
@@ -375,7 +379,7 @@ public:
 		Type fixType;
 		std::vector<std::string> keys;
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
 	};
 
 	struct DF_API MixedObjectSpecifier : public AbstractDataObject
@@ -383,7 +387,7 @@ public:
 		typedef const std::pair<std::string, Type>& ObjectIterator;
 		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
 		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools) override;
+		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
 	};
 
 	// Complex data object functions
