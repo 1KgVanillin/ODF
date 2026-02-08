@@ -66,15 +66,26 @@ int main()
 		ODF odf;
 
 
-		// example: result should be an unsigned int with value 
+		// example: define the type 0x69 as unsigned int and use it. works
+		//const unsigned char data[] = {
+		//	0x49ui8, // DEFTYPE, SSS1
+		//	0x69ui8, // SSS1ID0x69
+		//	0x23ui8, // Type: unsigned int
+
+		//	0x69ui8, // USETYPE
+		//	0x69ui8, // ID = 0x69
+		//	0x5, 0x5, 0x5, 0x5 // data
+		//};
+
+		// example: define the type 0x69 as extension to the built in types. as unsigned int and use it.
 		const unsigned char data[] = {
-			0x49ui8, // DEFTYPE, SSS1
-			0x69ui8, // SSS1ID0x69
+			0x9ui8, // DEFTYPE, SSS1
+			0x6Eui8, // SSS0ID0x6E
 			0x23ui8, // Type: unsigned int
 
-			0x69ui8, // USETYPE
-			0x69ui8, // ID = 0x69
-			0x5, 0x5, 0x5, 0x5 // data (1.347.440.720)
+			0x29ui8, // USETYPE
+			0x6Eui8, // ID = 0x6E
+			0x5, 0x5, 0x5, 0x5 // data
 		};
 
 
