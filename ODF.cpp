@@ -4118,6 +4118,16 @@ ODF::Pool ODF::operator+=(Pool pool)
 	return pool;
 }
 
+const ODF::PoolCollection& ODF::operator=(const PoolCollection& pc)
+{
+	return pools.emplace(pc);
+}
+
+ODF::ODF(const PoolCollection& pc)
+{
+	*this = pc;
+}
+
 void ODF::PoolCollection::addPool(Pool pool)
 {
 	importPools.push_back(pool);

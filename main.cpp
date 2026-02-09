@@ -77,19 +77,42 @@ int main()
 		//	0x5, 0x5, 0x5, 0x5 // data
 		//};
 
-		// example: define the type 0x69 as extension to the built in types. as unsigned int and use it.
-		const unsigned char data[] = {
-			0x9ui8, // DEFTYPE, SSS1
-			0x6Eui8, // SSS0ID0x6E
-			0x23ui8, // Type: unsigned int
+		// example: define the type 0x69 as extension to the built in types. as unsigned int and use it. works
+		//const unsigned char data[] = {
+		//	0x9ui8, // DEFTYPE, SSS0
+		//	0x6Eui8, // SSS0ID0x6E
+		//	0x23ui8, // Type: unsigned int
 
-			0x29ui8, // USETYPE
-			0x6Eui8, // ID = 0x6E
-			0x5, 0x5, 0x5, 0x5 // data
-		};
+		//	0x29ui8, // USETYPE
+		//	0x6Eui8, // ID = 0x6E
+		//	0x5, 0x5, 0x5, 0x5 // data
+		//};
 
+		// example: define type 0x69 and export it as 0x67. Then Import the type 0x67 as 0x69 and use it. works. Also works with regular IMPORT and EXPORT
+		//const unsigned char data[] = {
+		//	0x9ui8, // DEFTYPE, SSS1
+		//	0x69ui8, // SSS1ID0x69
+		//	0x23ui8, // Type: unsigned int
 
-		odf.loadFromMemory((const char*)data, sizeof(data));
+		//	0x2Aui8, // EXPORTAS
+		//	0x69, // ID
+		//	0x67 // GLOBAL ID
+		//};
+		//const unsigned char data2[] = {
+		//	0x2B, // IMPORTAS
+		//	0x67, // GLOBAL ID
+		//	0x69, // ID
+
+		//	0x29, // USETYPE
+		//	0x69, // ID
+		//	0x5, 0x5, 0x5, 0x5 // data
+		//};
+
+		ODF::PoolCollection pc = ODF::PoolCollection::makePool();
+		ODF virt = odf = pc;
+
+		virt.loadFromMemory((const char*)data, sizeof(data));
+		odf.loadFromMemory((const char*)data2, sizeof(data2));
 
 		cout << "result:\n" << odf << "\n";
 	}

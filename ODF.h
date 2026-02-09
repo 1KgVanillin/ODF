@@ -864,6 +864,8 @@ public:
 	void addImportPool(Pool pool);
 	void addExportPool(Pool pool);
 	Pool operator+=(Pool pool); // adds the pool as import and export pool
+	const PoolCollection& operator=(const PoolCollection& pc);
+	ODF(const PoolCollection& pc);
 
 	// operator=
 	ODF& operator=(const ODF& other); // copy
