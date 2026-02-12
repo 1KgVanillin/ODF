@@ -115,6 +115,7 @@ public:
 	struct Type;
 	typedef std::unordered_map<size_t, Type> PoolType;
 	typedef std::shared_ptr<PoolType> Pool;
+	struct DF_API VTypeInfo;
 	class DF_API PoolCollection
 	{
 	public:
@@ -129,7 +130,7 @@ public:
 		void exportType(size_t id, const Type& type);
 		void exportType(const std::pair<size_t, const Type&>& pair);
 
-		std::optional<Type> parse(MemoryDataStream& mem, PoolType& localPool); // working on it
+		std::optional<Type> parse(MemoryDataStream& mem, PoolType& localPool, std::optional<VTypeInfo&>& vtypeinfo); // working on it
 		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
 		static size_t getFullTypeID(UINT_32 id, bool replacesOldID);
 		static std::pair<UINT_32, bool> makeFullTypeID(size_t fullTypeID);
@@ -145,7 +146,44 @@ public:
 		static Pool makePool(); // destroyed automatically by shared_ptr
 	};
 
+	// std::optional helper function for references in optionals
+	template<typename T> std::optional<T&> getRefOpt(const std::optional<T>& opt) { return opt.has_value() ? opt.value() : std::optional<T&>(std::nullopt); }
+
+	struct ConstParseInfo;
+	struct DF_API VTypeInfo
+	{
+		std::unordered_map<Type, size_t> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
+		std::unordered_map<size_t, size_t> imports; // maps globalID (key) to localID (value)
+		std::unordered_map<size_t, size_t> exports; // maps localID (key) to globalID (value)
+
+		bool isAlreadyDefined(const Type& type) const;
+		std::optional<size_t> getTypeID(const Type& type) const; // returns nullopt if the type isn't defined
+		bool useType(MemoryDataStream& mem, const Type& type, const ConstParseInfo& parseInfo); // Use the type with USETYPE if it is defined (return true), otherwise save it normally (return false).
+		void saveDefinedTypes(MemoryDataStream& mem);
+		void saveImports(MemoryDataStream& mem) const;
+		void saveExports(MemoryDataStream& mem) const;
+	};
+
+	// not exported into the dll
+	struct ParseInfo
+	{
+		std::optional<PoolCollection&> pools;
+		std::optional<PoolType&> localPool;
+		std::optional<VTypeInfo&> vtypeinfo;
+		ParseInfo(const std::optional<PoolCollection&>& pools, const std::optional<PoolType&>& localPool, const std::optional<VTypeInfo&>& vtypeinfo);
+	};
+
+	// not exported into the dll
+	struct ConstParseInfo
+	{
+		std::optional<const PoolCollection&> pools;
+		std::optional<const PoolType&> localPool;
+		std::optional<const VTypeInfo&> vtypeinfo;
+		ConstParseInfo(const std::optional<const PoolCollection&>& pools, const std::optional<const PoolType&>& localPool, const std::optional<const VTypeInfo&>& vtypeinfo);
+	};
+
 	std::optional<PoolType> localPool; // file scope. only created for the root element
+	std::optional<VTypeInfo> vtypeinfo; // holds virtual type information. only created for the root element
 
 	// random constants
 	//static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
@@ -155,8 +193,8 @@ public:
 	class DF_API AbstractDataObject
 	{
 	public:
-		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
-		virtual void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) = 0;
+		virtual void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) = 0;
 	};
 
 	class DF_API TypeSpecifier : public AbstractDataObject // The size specifier specifier is removed automatically when impicitely used.
@@ -178,8 +216,8 @@ public:
 		static bool isVirtual(unsigned char type);
 		static bool isBuiltIn(unsigned char type);
 
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
+		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 
 		operator Type() const;
 		TypeSpecifier& operator=(unsigned char byte);
@@ -253,8 +291,8 @@ public:
 		TypeSpecifier sizeSpecifierSpecifier(TypeSpecifier original = 0) const; // wow. Use like type = spec.sizeSpecSpec(type). Selects the sizeSpecifierSpecifier as the smallest value possible that still fits
 		void load(MemoryDataStream& stream, TypeSpecifier type);
 		void saveToMemory(MemoryDataStream& stream, TypeSpecifier type) const; // explicit size. Only the last 2 bits matter.
-		void saveToMemory(MemoryDataStream& stream) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
+		void saveToMemory(MemoryDataStream& stream, const ConstParseInfo& parseInfo) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
+		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
 		SizeSpecifier();
 	};
 
@@ -304,8 +342,8 @@ public:
 		void checkImmutable() const; // THrows an exception if immutable. Ignore that if type == NULL. The NULL type also expresses an "uninitialized" type that can be written.
 		void readTypeSpecifier(MemoryDataStream& mem); // loads the type specifier from a stream and performs mutation check
 		void clear(); // deletes every optional specifier
-		Status saveToMemory(MemoryDataStream& mem) const;
-		Status loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool);
+		Status saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const;
+		Status loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo);
 		void setType(TypeSpecifier type); // use this, otherwise the object might throw exceptions or undefined behaiviour on save // TODO
 		inline bool isPrimitive() const; // True if no specifies other than TypeSpecifier are needed // TODO
 		inline bool needsObjectSpecifier() const;
@@ -347,7 +385,7 @@ public:
 		TypeSpecifier operator=(TypeSpecifier type);
 
 		Type();
-		Type(MemoryDataStream& mem, std::optional<ODF::PoolCollection> pools, std::optional<PoolType>& localPool); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails.
+		Type(MemoryDataStream& mem, const ParseInfo& parseInfo); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails.
 		Type(const Type& other);
 		Type(Type&& type) noexcept;
 		Type(TypeSpecifier type);
@@ -362,32 +400,32 @@ public:
 	{
 		SizeSpecifier size;
 		Type fixType; // always holds a value, is just a pointer because of the forward declaring
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
+		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
 
 	struct DF_API MixedArraySpecifier : public AbstractDataObject
 	{
 		std::vector<Type> types;
 
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
+		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
 
 	struct DF_API FixedObjectSpecifier : public AbstractDataObject
 	{
 		Type fixType;
 		std::vector<std::string> keys;
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
+		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
 
 	struct DF_API MixedObjectSpecifier : public AbstractDataObject
 	{
 		typedef const std::pair<std::string, Type>& ObjectIterator;
 		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, std::optional<PoolCollection>& pools, std::optional<PoolType>& localPool) override;
+		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
+		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
 
 	// Complex data object functions
