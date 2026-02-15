@@ -88,6 +88,10 @@ public:
 	{
 		InvalidParseInformation(const std::string& message = "InvalidParseInformation exception");
 	};
+	struct VTypeDataAlreadyExists : public std::runtime_error
+	{
+		VTypeDataAlreadyExists(const std::string& message = "VTypeDataAlreadyExists exception");
+	};
 
 	struct DF_API Status
 	{
@@ -115,8 +119,12 @@ public:
 		Status(Value val = Status::Ok);
 	};
 
-
 	struct Type;
+	// define a hash function for using Type as key in a map in VTypeInfo
+	struct TypeHasher
+	{
+		size_t operator()(const Type& type) const;
+	};
 	typedef std::unordered_map<size_t, Type> PoolType;
 	typedef std::shared_ptr<PoolType> Pool;
 	struct DF_API VTypeInfo;
@@ -153,9 +161,15 @@ public:
 	struct ConstParseInfo;
 	struct DF_API VTypeInfo
 	{
-		std::unordered_map<Type, size_t> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
+		std::unordered_map<Type, size_t, TypeHasher> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
 		std::unordered_map<size_t, size_t> imports; // maps globalID (key) to localID (value)
 		std::unordered_map<size_t, size_t> exports; // maps localID (key) to globalID (value)
+
+		void addExport(size_t id); // throws VTypeDataAlreadyExists if the element already exists
+		void addExport(size_t localID, size_t globalID); // throws VTypeDataAlreadyExists if the element (localID) already exists.
+		void addImport(size_t id); // throws VTypeDataAlreadyExists if the element already exists
+		void addImport(size_t globalID, size_t localID); // throws VTypeDataAlreadyExists if the element (globalID) already exists
+		void addDefinedType(const Type& type, size_t typeID); // throws VTypeDataAlreadyExists if the element already exists
 
 		bool isAlreadyDefined(const Type& type) const;
 		std::optional<size_t> getTypeID(const Type& type) const; // returns nullopt if the type isn't defined
@@ -175,6 +189,7 @@ public:
 		std::shared_ptr<PoolCollection> pools;
 		std::shared_ptr<PoolType> localPool;
 		std::shared_ptr<VTypeInfo> vtypeinfo;
+		ParseInfo(std::shared_ptr<PoolCollection>& pools, std::shared_ptr<PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo);
 		ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo);
 	};
 
@@ -382,9 +397,9 @@ public:
 		void makeComplexSpec(); // memory leak safe. Makes sure complexSpec is valid, keeps the old one if one is already existing
 		void resetComplexSpec(); // memory leak safe. If an old complexSpec exists it gets destroyed, then a fresh one is allcated. Maybe fix performace of this by keeping and overwriting the old object? TODO
 
-		friend bool DF_API operator==(const Type& t1, const Type& t2);
 		friend bool DF_API operator!=(const Type& t1, const Type& t2);
 		bool operator!(); // returns !(type != NULL) -> type == NULL
+		bool operator==(const Type& other) const;
 
 		operator unsigned char();
 		Type& operator=(const Type& other);
@@ -399,7 +414,6 @@ public:
 
 		static Type findBestType(TypeClass tc, unsigned char size, bool unsign = false); // only valid for primitive types. unsign is ignored if no integer type
 	};
-
 	// The ArraySpecifier holds all type information that is needed to load or save an array.
 	// saves or loads the size specifier on save
 	struct DF_API FixedArraySpecifier : public AbstractDataObject

@@ -35,7 +35,6 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 
 int main()
 {
-	return 0;
 	try {
 
 		// Data type test code
@@ -91,24 +90,24 @@ int main()
 		//};
 
 		// example: define type 0x69 and export it as 0x67. Then Import the type 0x67 as 0x69 and use it. works. Also works with regular IMPORT and EXPORT
-		//const unsigned char data[] = {
-		//	0x9ui8, // DEFTYPE, SSS1
-		//	0x69ui8, // SSS1ID0x69
-		//	0x23ui8, // Type: unsigned int
+		const unsigned char data[] = {
+			0x9ui8, // DEFTYPE, SSS1
+			0x69ui8, // SSS1ID0x69
+			0x23ui8, // Type: unsigned int
 
-		//	0x2Aui8, // EXPORTAS
-		//	0x69, // ID
-		//	0x67 // GLOBAL ID
-		//};
-		//const unsigned char data2[] = {
-		//	0x2B, // IMPORTAS
-		//	0x67, // GLOBAL ID
-		//	0x69, // ID
+			0x2Aui8, // EXPORTAS
+			0x69, // ID
+			0x67 // GLOBAL ID
+		};
+		const unsigned char data2[] = {
+			0x2B, // IMPORTAS
+			0x67, // GLOBAL ID
+			0x69, // ID
 
-		//	0x29, // USETYPE
-		//	0x69, // ID
-		//	0x5, 0x5, 0x5, 0x5 // data
-		//};
+			0x29, // USETYPE
+			0x69, // ID
+			0x5, 0x5, 0x5, 0x5 // data
+		};
 
 		ODF::PoolCollection pc = ODF::PoolCollection::makePool();
 		ODF virt = odf = pc;

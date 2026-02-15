@@ -273,70 +273,9 @@ bool operator!=(ODF::TypeSpecifier spec, ODF::TypeSpecifier::Type type)
 	return spec.byte() != type;
 }
 
-bool operator==(const ODF::Type& t1, const ODF::Type& t2)
-{
-	if (t1.type != t2.type) // check if primitive types match
-		return false;
-	if (t1.isPrimitive()) // if those match they will be equal if either of them (both) are primitive
-		return true;
-
-	// compare complexSpecifiers
-	if (t1.isList())
-	{
-		if (t1.isFixed())
-		{
-			ODF::FixedArraySpecifier* spec1 = t1.fixedArraySpecifier();
-			ODF::FixedArraySpecifier* spec2 = t2.fixedArraySpecifier();
-			return spec2->fixType == spec2->fixType && spec2->size.actualSize == spec2->size.actualSize;
-		}
-		else
-		{
-			ODF::MixedArraySpecifier* spec1 = t1.mixedArraySpecifier();
-			ODF::MixedArraySpecifier* spec2 = t2.mixedArraySpecifier();
-			if (spec1->types.size() != spec2->types.size())
-				return false;
-			for (size_t i = 0; i < spec1->types.size(); i++)
-				if (spec1->types[i] != spec2->types[i])
-					return false;
-			return true;
-		}
-	}
-	else
-	{
-		if (t1.isFixed())
-		{
-			ODF::FixedObjectSpecifier* spec1 = t1.fixedObjectSpecifier();
-			ODF::FixedObjectSpecifier* spec2 = t2.fixedObjectSpecifier();
-			if (spec1->fixType != spec2->fixType)
-				return false;
-			if (spec1->keys.size() != spec2->keys.size())
-				return false;
-			for (size_t i = 0; i < spec1->keys.size(); i++)
-				if (spec1->keys[i] != spec2->keys[i])
-					return false;
-			return true;
-		}
-		else
-		{
-			ODF::MixedObjectSpecifier* spec1 = t1.mixedObjectSpecifier();
-			ODF::MixedObjectSpecifier* spec2 = t2.mixedObjectSpecifier();
-			try {
-				for (const std::pair<std::string, ODF::Type>& it : spec1->properties)
-					if (spec2->properties.at(it.first) != it.second)
-						return false;
-			}
-			catch (std::out_of_range&)
-			{
-				return false; // a key wasn't found
-			}
-			return true;
-		}
-	}
-}
-
 bool operator!=(const ODF::Type& t1, const ODF::Type& t2)
 {
-	return !operator==(t1, t2);
+	return !(t1 == t2);
 }
 
 bool DF_API operator==(const ODF::Object& obj1, const ODF::Object& obj2)
@@ -1789,6 +1728,68 @@ bool ODF::Type::operator!()
 	return type == TypeSpecifier::NULLTYPE;
 }
 
+bool ODF::Type::operator==(const Type& other) const
+{
+
+	if (this->type != other.type) // check if primitive types match
+		return false;
+	if (this->isPrimitive()) // if those match they will be equal if either of them (both) are primitive
+		return true;
+
+	// compare complexSpecifiers
+	if (this->isList())
+	{
+		if (this->isFixed())
+		{
+			ODF::FixedArraySpecifier* spec1 = this->fixedArraySpecifier();
+			ODF::FixedArraySpecifier* spec2 = other.fixedArraySpecifier();
+			return spec2->fixType == spec2->fixType && spec2->size.actualSize == spec2->size.actualSize;
+		}
+		else
+		{
+			ODF::MixedArraySpecifier* spec1 = this->mixedArraySpecifier();
+			ODF::MixedArraySpecifier* spec2 = other.mixedArraySpecifier();
+			if (spec1->types.size() != spec2->types.size())
+				return false;
+			for (size_t i = 0; i < spec1->types.size(); i++)
+				if (spec1->types[i] != spec2->types[i])
+					return false;
+			return true;
+		}
+	}
+	else
+	{
+		if (this->isFixed())
+		{
+			ODF::FixedObjectSpecifier* spec1 = this->fixedObjectSpecifier();
+			ODF::FixedObjectSpecifier* spec2 = other.fixedObjectSpecifier();
+			if (spec1->fixType != spec2->fixType)
+				return false;
+			if (spec1->keys.size() != spec2->keys.size())
+				return false;
+			for (size_t i = 0; i < spec1->keys.size(); i++)
+				if (spec1->keys[i] != spec2->keys[i])
+					return false;
+			return true;
+		}
+		else
+		{
+			ODF::MixedObjectSpecifier* spec1 = this->mixedObjectSpecifier();
+			ODF::MixedObjectSpecifier* spec2 = other.mixedObjectSpecifier();
+			try {
+				for (const std::pair<std::string, ODF::Type>& it : spec1->properties)
+					if (spec2->properties.at(it.first) != it.second)
+						return false;
+			}
+			catch (std::out_of_range&)
+			{
+				return false; // a key wasn't found
+			}
+			return true;
+		}
+	}
+}
+
 ODF::Type::operator unsigned char()
 {
 	return type;
@@ -2070,10 +2071,8 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 	// pools are not needed in loadBody, as they are only linking types.
 
 	ParseInfo parseInfo(pools, localPool, vtypeinfo);
+
 repeat: // jump here to read again without recursion
-
-
-
 	switch (Status error = type.loadFromMemory(mem, parseInfo))
 	{
 	case Status::Ok:
@@ -4157,13 +4156,18 @@ void ODF::PoolCollection::exportType(const std::pair<size_t, const Type&>& pair)
 
 std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
 {
-	// parse the virtual type and return it. Only USETYPE returns a type, all other virtaul types must be callable without a body, so they do not return a type
-	unsigned char vtype = mem.read();
-	Type type;
-
 	using TS = TypeSpecifier;
-	size_t key;
 
+	// parse the virtual type and return it. Only USETYPE returns a type, all other virtaul types must be callable without a body, so they do not return a type.
+
+	// Every information about all pools will be written into th vtypeinfo, so the exact same virtual type structure can be reproduced on saving.
+	
+	// read TypeSpecifier
+	unsigned char vtype = mem.read();
+
+	// declare variables for switch statement
+	Type type;
+	size_t key;
 
 	// little note on memory mangement:
 	// The PoolCollection inherits from std::enable_shared_from_this to get access to itself in a shared_ptr.
@@ -4178,21 +4182,24 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 		
 		switch (getVTypeSizeSpec(vtype))
 		{
+			// this syntax in the case blocks may seem a little weird.
+			// first the type is loaded by its constructor.
+			// This type is than saved in the localPool and added as a key into defiendTypes which points to the typeID, which is used as key by the localPool.
 		case 0:
 			key = getFullTypeID(mem.read<UINT_8>(), true);
-			(*localPool)[key] = Type(mem, parseInfo);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
 			return std::nullopt;
 		case 1:
 			key = getFullTypeID(mem.read<UINT_8>(), false);
-			(*localPool)[key] = Type(mem, parseInfo);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
 			return std::nullopt;
 		case 2:
 			key = getFullTypeID(mem.read<UINT_16>(), false);
-			(*localPool)[key] = Type(mem, parseInfo);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
 			return std::nullopt;
 		case 3:
 			key = getFullTypeID(mem.read<UINT_32>(), false);
-			(*localPool)[key] = Type(mem, parseInfo);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
 			return std::nullopt;
 		}
 		break;
@@ -4225,21 +4232,20 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 			{
 			case 0:
 				typeID = getFullTypeID(mem.read<UINT_8>(), true);
-				exportType(typeID, localPool->at(typeID));
-				return std::nullopt;
+				break;
 			case 1:
 				typeID = getFullTypeID(mem.read<UINT_8>(), false);
-				exportType(typeID, localPool->at(typeID));
-				return std::nullopt;
+				break;
 			case 2:
 				typeID = getFullTypeID(mem.read<UINT_16>(), false);
-				exportType(typeID, localPool->at(typeID));
-				return std::nullopt;
+				break;
 			case 3:
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
-				exportType(typeID, localPool->at(typeID));
-				return std::nullopt;
+				break;
 			}
+			exportType(typeID, localPool->at(typeID));
+			vtypeinfo->addExport(typeID);
+			return std::nullopt;
 		}
 		catch (std::out_of_range&)
 		{
@@ -4255,24 +4261,23 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 			case 0:
 				localID = getFullTypeID(mem.read<UINT_8>(), true);
 				globalID = getFullTypeID(mem.read<UINT_8>(), true);
-				exportType(globalID, localPool->at(localID));
-				return std::nullopt;
+				break;
 			case 1:
 				localID = getFullTypeID(mem.read<UINT_8>(), false);
 				globalID = getFullTypeID(mem.read<UINT_8>(), false);
-				exportType(globalID, localPool->at(localID));
-				return std::nullopt;
+				break;
 			case 2:
 				localID = getFullTypeID(mem.read<UINT_16>(), false);
 				globalID = getFullTypeID(mem.read<UINT_16>(), false);
-				exportType(globalID, localPool->at(localID));
-				return std::nullopt;
+				break;
 			case 3:
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
-				exportType(globalID, localPool->at(localID));
-				return std::nullopt;
+				break;
 			}
+			exportType(globalID, localPool->at(localID));
+			vtypeinfo->addExport(localID, globalID);
+			return std::nullopt;
 		}
 		catch (std::out_of_range&)
 		{
@@ -4287,21 +4292,20 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 			{
 			case 0:
 				typeID = getFullTypeID(mem.read<UINT_8>(), true);
-				(*localPool)[typeID] = importType(typeID).value();
-				return std::nullopt;
+				break;
 			case 1:
 				typeID = getFullTypeID(mem.read<UINT_8>(), false);
-				(*localPool)[typeID] = importType(typeID).value();
-				return std::nullopt;
+				break;
 			case 2:
 				typeID = getFullTypeID(mem.read<UINT_16>(), false);
-				(*localPool)[typeID] = importType(typeID).value();
-				return std::nullopt;
+				break;
 			case 3:
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
-				(*localPool)[typeID] = importType(typeID).value();
-				return std::nullopt;
+				break;
 			}
+			(*localPool)[typeID] = importType(typeID).value();
+			vtypeinfo->addImport(typeID);
+			return std::nullopt;
 		}
 		catch (std::bad_optional_access&)
 		{
@@ -4317,24 +4321,23 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 			case 0:
 				globalID = getFullTypeID(mem.read<UINT_8>(), true);
 				localID = getFullTypeID(mem.read<UINT_8>(), true);
-				(*localPool)[localID] = importType(globalID).value();
-				return std::nullopt;
+				break;
 			case 1:
 				globalID = getFullTypeID(mem.read<UINT_8>(), false);
 				localID = getFullTypeID(mem.read<UINT_8>(), false);
-				(*localPool)[localID] = importType(globalID).value();
-				return std::nullopt;
+				break;
 			case 2:
 				globalID = getFullTypeID(mem.read<UINT_16>(), false);
 				localID = getFullTypeID(mem.read<UINT_16>(), false);
-				(*localPool)[localID] = importType(globalID).value();
-				return std::nullopt;
+				break;
 			case 3:
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
-				(*localPool)[localID] = importType(globalID).value();
-				return std::nullopt;
+				break;
 			}
+			(*localPool)[localID] = importType(globalID).value();
+			vtypeinfo->addImport(globalID, localID);
+			return std::nullopt;
 		}
 		catch (std::bad_optional_access&)
 		{
@@ -4344,7 +4347,7 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 	default:
 		return std::nullopt;
 	}
-	THROW InvalidCondition("End of Function 'ODF::PoolCollection::parse(MemoryDataStream&, PoolType&)' reached.");
+	THROW InvalidCondition("InvalidCondition: End of Function 'ODF::PoolCollection::parse(MemoryDataStream&, PoolType&)' reached.");
 }
 
 unsigned char ODF::PoolCollection::getVTypeSizeSpec(unsigned char vtype)
@@ -4394,6 +4397,51 @@ ODF::Pool ODF::PoolCollection::makePool()
 }
 
 ODF::UnresolvedImport::UnresolvedImport(const std::string& message) : runtime_error(message) {}
+
+void ODF::VTypeInfo::addExport(size_t id)
+{
+	if (exports.contains(id))
+	{
+		THROW VTypeDataAlreadyExists();
+	}
+	exports[id] = id;
+}
+
+void ODF::VTypeInfo::addExport(size_t localID, size_t globalID)
+{
+	if (exports.contains(localID))
+	{
+		THROW VTypeDataAlreadyExists();
+	}
+	exports[localID] = globalID;
+}
+
+void ODF::VTypeInfo::addImport(size_t id)
+{
+	if (imports.contains(id))
+	{
+		THROW VTypeDataAlreadyExists();
+	}
+	imports[id] = id;
+}
+
+void ODF::VTypeInfo::addImport(size_t globalID, size_t localID)
+{
+	if (imports.contains(globalID))
+	{
+		THROW VTypeDataAlreadyExists();
+	}
+	imports[globalID] = localID;
+}
+
+void ODF::VTypeInfo::addDefinedType(const Type& type, size_t typeID)
+{
+	if (definedTypes.contains(type))
+	{
+		THROW VTypeDataAlreadyExists();
+	}
+	definedTypes[type] = typeID;
+}
 
 bool ODF::VTypeInfo::isAlreadyDefined(const Type& type) const
 {
@@ -4495,8 +4543,56 @@ std::shared_ptr<ODF::PoolCollection>& ODF::ParseInfo::guaranteePoolCollection()
 	return pools;
 }
 
-ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
+ODF::ParseInfo::ParseInfo(std::shared_ptr<PoolCollection>& pools, std::shared_ptr<PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo)
+{
+	this->pools = pools ? pools : pools = std::make_shared<PoolCollection>(); // assigns to pools if pools holds a value, otherwise points both pools pointer to a new PoolCollection
+	this->localPool = localPool ? localPool : localPool = std::make_shared<PoolType>();
+	this->vtypeinfo = vtypeinfo ? vtypeinfo : vtypeinfo = std::make_shared<VTypeInfo>();
+}
+
+ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
+{
+	if (!pools)
+	{
+		THROW InvalidParseInformation("InvalidParseInformation: ParseInfo::ParseInfo(...) with 'const std::shared_ptr<PoolCollection>& pools' was called, though pools does not contain a valid value");
+	}
+	if (!localPool)
+	{
+		THROW InvalidParseInformation("InvalidParseInformation: ParseInfo::ParseInfo(...) with 'const std::shared_ptr<PoolCollection>& pools' was called, though localPool does not contain a valid value");
+	}
+	if (!vtypeinfo)
+	{
+		THROW InvalidParseInformation("InvalidParseInformation: ParseInfo::ParseInfo(...) with 'const std::shared_ptr<PoolCollection>& pools' was called, though vtypeinfo does not contain a valid value");
+	}
+	this->pools = pools;
+	this->localPool = localPool;
+	this->vtypeinfo = vtypeinfo;
+}
 
 ODF::ConstParseInfo::ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
 
 ODF::InvalidParseInformation::InvalidParseInformation(const std::string& message) : runtime_error(message) {}
+
+ODF::VTypeDataAlreadyExists::VTypeDataAlreadyExists(const std::string& message) : runtime_error(message) {}
+
+
+// little helper function for ODF::TypeHasher::operator()
+size_t hash_combine(size_t lhs, size_t rhs) {
+	if constexpr (sizeof(size_t) >= 8) {
+		lhs ^= rhs + 0x517cc1b727220a95 + (lhs << 6) + (lhs >> 2);
+	}
+	else {
+		lhs ^= rhs + 0x9e3779b9 + (lhs << 6) + (lhs >> 2);
+	}
+	return lhs;
+}
+
+size_t ODF::TypeHasher::operator()(const Type& type) const
+{
+	// properties that needs to be hashed are complexSpec, immutable and type
+	// it is sufficient to only hash the pointer complexSpec, isntead of the pointee, as a same pointer value will result in the same pointee value.
+	size_t complexSpecHash = std::hash<ODF::Type::ComplexSpecifier*>{}(type.complexSpec);
+	size_t immutableHash = std::hash<bool>{}(type.immutable);
+	size_t typeHash = std::hash<unsigned char>{}(type.type);
+	return hash_combine(complexSpecHash, hash_combine(immutableHash, typeHash));
+}
