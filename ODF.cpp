@@ -95,6 +95,12 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem, const ConstParseInfo&
 
 ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo)
 {
+	// makes sure every pointer is valid
+	if (parseInfo.containsInvalidPointer())
+	{
+		THROW InvalidParseInformation();
+	}
+
 	destroyComplexSpec(); // destroy the last complexSpec if the object was already in use
 
 	// check for virtual types
@@ -103,22 +109,10 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& pa
 	{
 		// the local pool will be used to parse the virtual type. If existing, the provided PoolCollection will also be used, though one will be created in any scenario and left empty in case the pools optional was empty
 
-		PoolType* lPool;
-		if (parseInfo.localPool.has_value())
-			lPool = &parseInfo.localPool.value();
-		else
-			lPool = &parseInfo.localPool.emplace();
-
-		// parse the virtual type
-		try
+		// it is required that lPool points to a valid pool. If no localPool is provided, one will be created. Same for the poolCollection
+		try // parse(...) might throw
 		{
-			PoolCollection* pCollection;
-			if (parseInfo.pools.has_value())
-				pCollection = &parseInfo.pools.value();
-			else
-				pCollection = &parseInfo.pools.emplace();
-
-			std::optional<Type> optType = pCollection->parse(mem, *lPool, parseInfo.vtypeinfo);
+			std::optional<Type> optType = parseInfo.pools->parse(mem, parseInfo.localPool, parseInfo.vtypeinfo);
 			if (optType.has_value())
 			{
 				*this = optType.value();
@@ -145,11 +139,7 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& pa
 			// try importing the type from a pool
 			try
 			{
-				if (!parseInfo.pools.has_value())
-				{
-					return Status::NoPoolProvided;
-				}
-				*this = parseInfo.pools.value().importType(PoolCollection::getFullTypeID(byte, true)).value();
+				*this = parseInfo.pools->importType(PoolCollection::getFullTypeID(byte, true)).value();
 			}
 			catch (std::bad_optional_access&)
 			{
@@ -2079,7 +2069,7 @@ ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
 	// pools only need to be passed to the type loading, of this element and all of its childs, as that are all types of this translation unit.
 	// pools are not needed in loadBody, as they are only linking types.
 
-	ParseInfo parseInfo(getRefOpt(pools), getRefOpt(localPool), getRefOpt(vtypeinfo));
+	ParseInfo parseInfo(pools, localPool, vtypeinfo);
 repeat: // jump here to read again without recursion
 
 
@@ -4098,22 +4088,22 @@ void ODF::PoolCollection::addExportPool(Pool pool)
 
 void ODF::usePools()
 {
-	pools.emplace();
+	pools = std::make_shared<PoolCollection>();
 }
 
 void ODF::addPool(Pool pool)
 {
-	pools.value().addPool(pool);
+	pools->addPool(pool);
 }
 
 void ODF::addImportPool(Pool pool)
 {
-	pools.value().addImportPool(pool);
+	pools->addImportPool(pool);
 }
 
 void ODF::addExportPool(Pool pool)
 {
-	pools.value().addExportPool(pool);
+	pools->addExportPool(pool);
 }
 
 ODF::Pool ODF::operator+=(Pool pool)
@@ -4124,7 +4114,7 @@ ODF::Pool ODF::operator+=(Pool pool)
 
 const ODF::PoolCollection& ODF::operator=(const PoolCollection& pc)
 {
-	return pools.emplace(pc);
+	return *(pools = std::make_shared<PoolCollection>(pc)); // the old one is automatically deallocated by std::shared_ptr::operator=
 }
 
 ODF::ODF(const PoolCollection& pc)
@@ -4165,18 +4155,21 @@ void ODF::PoolCollection::exportType(const std::pair<size_t, const Type&>& pair)
 		it->insert(pair);
 }
 
-std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolType& localPool, std::optional<VTypeInfo&>& vtypeinfo)
+std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
 {
 	// parse the virtual type and return it. Only USETYPE returns a type, all other virtaul types must be callable without a body, so they do not return a type
 	unsigned char vtype = mem.read();
 	Type type;
 
 	using TS = TypeSpecifier;
-	std::optional lPoolOpt = localPool;
 	size_t key;
 
-	std::optional<ODF::PoolCollection&> optpc = *this;
-	ParseInfo parseInfo(*this, localPool, vtypeinfo);
+
+	// little note on memory mangement:
+	// The PoolCollection inherits from std::enable_shared_from_this to get access to itself in a shared_ptr.
+	// For the construction of the parseInfo struct a shared_ptr to the PoolCollection is needed, which is the current object.
+	// This shared_ptr to itself is provided by std::enable_shared_from_this. It is important that the current object is already contained in a shared_ptr, else a std::bad_weak_ptr is thrown
+	ParseInfo parseInfo(shared_from_this(), localPool, vtypeinfo);
 
 	switch (vtype & 0b0011'1111)
 	{
@@ -4187,19 +4180,19 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolT
 		{
 		case 0:
 			key = getFullTypeID(mem.read<UINT_8>(), true);
-			localPool[key] = Type(mem, parseInfo);
+			(*localPool)[key] = Type(mem, parseInfo);
 			return std::nullopt;
 		case 1:
 			key = getFullTypeID(mem.read<UINT_8>(), false);
-			localPool[key] = Type(mem, parseInfo);
+			(*localPool)[key] = Type(mem, parseInfo);
 			return std::nullopt;
 		case 2:
 			key = getFullTypeID(mem.read<UINT_16>(), false);
-			localPool[key] = Type(mem, parseInfo);
+			(*localPool)[key] = Type(mem, parseInfo);
 			return std::nullopt;
 		case 3:
 			key = getFullTypeID(mem.read<UINT_32>(), false);
-			localPool[key] = Type(mem, parseInfo);
+			(*localPool)[key] = Type(mem, parseInfo);
 			return std::nullopt;
 		}
 		break;
@@ -4210,13 +4203,13 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolT
 			switch (getVTypeSizeSpec(vtype))
 			{
 			case 0:
-				return localPool.at(getFullTypeID(mem.read<UINT_8>(), true));
+				return localPool->at(getFullTypeID(mem.read<UINT_8>(), true));
 			case 1:
-				return localPool.at(getFullTypeID(mem.read<UINT_8>(), false));
+				return localPool->at(getFullTypeID(mem.read<UINT_8>(), false));
 			case 2:
-				return localPool.at(getFullTypeID(mem.read<UINT_16>(), false));
+				return localPool->at(getFullTypeID(mem.read<UINT_16>(), false));
 			case 3:
-				return localPool.at(getFullTypeID(mem.read<UINT_32>(), false));
+				return localPool->at(getFullTypeID(mem.read<UINT_32>(), false));
 			}
 		}
 		catch (std::out_of_range&)
@@ -4232,19 +4225,19 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolT
 			{
 			case 0:
 				typeID = getFullTypeID(mem.read<UINT_8>(), true);
-				exportType(typeID, localPool.at(typeID));
+				exportType(typeID, localPool->at(typeID));
 				return std::nullopt;
 			case 1:
 				typeID = getFullTypeID(mem.read<UINT_8>(), false);
-				exportType(typeID, localPool.at(typeID));
+				exportType(typeID, localPool->at(typeID));
 				return std::nullopt;
 			case 2:
 				typeID = getFullTypeID(mem.read<UINT_16>(), false);
-				exportType(typeID, localPool.at(typeID));
+				exportType(typeID, localPool->at(typeID));
 				return std::nullopt;
 			case 3:
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
-				exportType(typeID, localPool.at(typeID));
+				exportType(typeID, localPool->at(typeID));
 				return std::nullopt;
 			}
 		}
@@ -4262,22 +4255,22 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolT
 			case 0:
 				localID = getFullTypeID(mem.read<UINT_8>(), true);
 				globalID = getFullTypeID(mem.read<UINT_8>(), true);
-				exportType(globalID, localPool.at(localID));
+				exportType(globalID, localPool->at(localID));
 				return std::nullopt;
 			case 1:
 				localID = getFullTypeID(mem.read<UINT_8>(), false);
 				globalID = getFullTypeID(mem.read<UINT_8>(), false);
-				exportType(globalID, localPool.at(localID));
+				exportType(globalID, localPool->at(localID));
 				return std::nullopt;
 			case 2:
 				localID = getFullTypeID(mem.read<UINT_16>(), false);
 				globalID = getFullTypeID(mem.read<UINT_16>(), false);
-				exportType(globalID, localPool.at(localID));
+				exportType(globalID, localPool->at(localID));
 				return std::nullopt;
 			case 3:
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
-				exportType(globalID, localPool.at(localID));
+				exportType(globalID, localPool->at(localID));
 				return std::nullopt;
 			}
 		}
@@ -4294,19 +4287,19 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolT
 			{
 			case 0:
 				typeID = getFullTypeID(mem.read<UINT_8>(), true);
-				localPool[typeID] = importType(typeID).value();
+				(*localPool)[typeID] = importType(typeID).value();
 				return std::nullopt;
 			case 1:
 				typeID = getFullTypeID(mem.read<UINT_8>(), false);
-				localPool[typeID] = importType(typeID).value();
+				(*localPool)[typeID] = importType(typeID).value();
 				return std::nullopt;
 			case 2:
 				typeID = getFullTypeID(mem.read<UINT_16>(), false);
-				localPool[typeID] = importType(typeID).value();
+				(*localPool)[typeID] = importType(typeID).value();
 				return std::nullopt;
 			case 3:
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
-				localPool[typeID] = importType(typeID).value();
+				(*localPool)[typeID] = importType(typeID).value();
 				return std::nullopt;
 			}
 		}
@@ -4324,22 +4317,22 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, PoolT
 			case 0:
 				globalID = getFullTypeID(mem.read<UINT_8>(), true);
 				localID = getFullTypeID(mem.read<UINT_8>(), true);
-				localPool[localID] = importType(globalID).value();
+				(*localPool)[localID] = importType(globalID).value();
 				return std::nullopt;
 			case 1:
 				globalID = getFullTypeID(mem.read<UINT_8>(), false);
 				localID = getFullTypeID(mem.read<UINT_8>(), false);
-				localPool[localID] = importType(globalID).value();
+				(*localPool)[localID] = importType(globalID).value();
 				return std::nullopt;
 			case 2:
 				globalID = getFullTypeID(mem.read<UINT_16>(), false);
 				localID = getFullTypeID(mem.read<UINT_16>(), false);
-				localPool[localID] = importType(globalID).value();
+				(*localPool)[localID] = importType(globalID).value();
 				return std::nullopt;
 			case 3:
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
-				localPool[localID] = importType(globalID).value();
+				(*localPool)[localID] = importType(globalID).value();
 				return std::nullopt;
 			}
 		}
@@ -4483,6 +4476,27 @@ void ODF::VTypeInfo::saveExports(MemoryDataStream& mem) const
 	}
 }
 
-ODF::ParseInfo::ParseInfo(const std::optional<PoolCollection&>& pools, const std::optional<PoolType&>& localPool, const std::optional<VTypeInfo&>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
+bool ODF::ParseInfo::containsInvalidPointer() const
+{
+	return !pools || !localPool || !vtypeinfo;
+}
 
-ODF::ConstParseInfo::ConstParseInfo(const std::optional<const PoolCollection&>& pools, const std::optional<const PoolType&>& localPool, const std::optional<const VTypeInfo&>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
+std::shared_ptr<ODF::PoolType>& ODF::ParseInfo::guarateeLocalPool()
+{
+	if (!localPool)
+		localPool = std::make_shared<PoolType>();
+	return localPool;
+}
+
+std::shared_ptr<ODF::PoolCollection>& ODF::ParseInfo::guaranteePoolCollection()
+{
+	if (!pools)
+		pools = std::make_shared<PoolCollection>();
+	return pools;
+}
+
+ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
+
+ODF::ConstParseInfo::ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
+
+ODF::InvalidParseInformation::InvalidParseInformation(const std::string& message) : runtime_error(message) {}

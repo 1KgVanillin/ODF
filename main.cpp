@@ -32,8 +32,10 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 
 // current debug TODO 
 
+
 int main()
 {
+	return 0;
 	try {
 
 		// Data type test code

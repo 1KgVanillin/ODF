@@ -84,6 +84,10 @@ public:
 	{
 		UnresolvedImport(const std::string& message = "UnresovledImport exception");
 	};
+	struct DF_API InvalidParseInformation : public std::runtime_error
+	{
+		InvalidParseInformation(const std::string& message = "InvalidParseInformation exception");
+	};
 
 	struct DF_API Status
 	{
@@ -116,7 +120,7 @@ public:
 	typedef std::unordered_map<size_t, Type> PoolType;
 	typedef std::shared_ptr<PoolType> Pool;
 	struct DF_API VTypeInfo;
-	class DF_API PoolCollection
+	class DF_API PoolCollection : public std::enable_shared_from_this<PoolCollection> // see ODF::PoolCollection::parse in ODF.cpp for more details on enable_shared_from_this
 	{
 	public:
 		std::vector<Pool> importPools; // pools from which types are imported
@@ -130,7 +134,7 @@ public:
 		void exportType(size_t id, const Type& type);
 		void exportType(const std::pair<size_t, const Type&>& pair);
 
-		std::optional<Type> parse(MemoryDataStream& mem, PoolType& localPool, std::optional<VTypeInfo&>& vtypeinfo); // working on it
+		std::optional<Type> parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo); // working on it
 		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
 		static size_t getFullTypeID(UINT_32 id, bool replacesOldID);
 		static std::pair<UINT_32, bool> makeFullTypeID(size_t fullTypeID);
@@ -145,9 +149,6 @@ public:
 		// create a new pool
 		static Pool makePool(); // destroyed automatically by shared_ptr
 	};
-
-	// std::optional helper function for references in optionals
-	template<typename T> std::optional<T&> getRefOpt(const std::optional<T>& opt) { return opt.has_value() ? opt.value() : std::optional<T&>(std::nullopt); }
 
 	struct ConstParseInfo;
 	struct DF_API VTypeInfo
@@ -167,23 +168,28 @@ public:
 	// not exported into the dll
 	struct ParseInfo
 	{
-		std::optional<PoolCollection&> pools;
-		std::optional<PoolType&> localPool;
-		std::optional<VTypeInfo&> vtypeinfo;
-		ParseInfo(const std::optional<PoolCollection&>& pools, const std::optional<PoolType&>& localPool, const std::optional<VTypeInfo&>& vtypeinfo);
+		bool containsInvalidPointer() const;
+		std::shared_ptr<PoolType>& guarateeLocalPool(); // make sure localPool points to a valid pool. Returns a reference to the shared_ptr. Referece becomes invalid if the ParseInfo object is destroyed.
+		std::shared_ptr<PoolCollection>& guaranteePoolCollection(); // make sure pools points to a valid PoolCollection. Returns a reference to the shared_ptr. Referece becomes invalid if the ParseInfo object is destroyed.
+
+		std::shared_ptr<PoolCollection> pools;
+		std::shared_ptr<PoolType> localPool;
+		std::shared_ptr<VTypeInfo> vtypeinfo;
+		ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo);
 	};
 
 	// not exported into the dll
 	struct ConstParseInfo
 	{
-		std::optional<const PoolCollection&> pools;
-		std::optional<const PoolType&> localPool;
-		std::optional<const VTypeInfo&> vtypeinfo;
-		ConstParseInfo(const std::optional<const PoolCollection&>& pools, const std::optional<const PoolType&>& localPool, const std::optional<const VTypeInfo&>& vtypeinfo);
+		std::shared_ptr<const PoolCollection> pools;
+		std::shared_ptr<const PoolType> localPool;
+		std::shared_ptr<const VTypeInfo> vtypeinfo;
+		ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo);
 	};
+	// both shared_ptrs are used as optional (nullptr if no value)
 
-	std::optional<PoolType> localPool; // file scope. only created for the root element
-	std::optional<VTypeInfo> vtypeinfo; // holds virtual type information. only created for the root element
+	std::shared_ptr<PoolType> localPool; // file scope. only created for the root element
+	std::shared_ptr<VTypeInfo> vtypeinfo; // holds virtual type information. only created for the root element
 
 	// random constants
 	//static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
@@ -896,7 +902,7 @@ public:
 	// Interface
 
 	// Pool interface: do not use pools by default to increase performance on temporarily created objects or if they aren't needed.
-	std::optional<PoolCollection> pools;
+	std::shared_ptr<PoolCollection> pools;
 	void usePools(); // creates a valid value in the optional
 	void addPool(Pool pool);
 	void addImportPool(Pool pool);
