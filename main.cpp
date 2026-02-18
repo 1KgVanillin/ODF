@@ -115,7 +115,13 @@ int main()
 		virt.loadFromMemory((const char*)data, sizeof(data));
 		odf.loadFromMemory((const char*)data2, sizeof(data2));
 
-		cout << "result:\n" << odf << "\n";
+		cout << "result:\n" << odf << "original: " << 0x05050505ui32 << "\n";
+
+		MemoryDataStream dynMDS; // dynamically allocated
+		odf.saveToMemory(dynMDS);
+
+		ODF old = odf;
+		odf.loadFromMemory(dynMDS.data(), dynMDS.size());
 	}
 	catch (std::runtime_error& err)
 	{

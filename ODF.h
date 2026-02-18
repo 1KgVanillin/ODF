@@ -92,6 +92,11 @@ public:
 	{
 		VTypeDataAlreadyExists(const std::string& message = "VTypeDataAlreadyExists exception");
 	};
+	// thrown in a typeID is specified as built-in though the runtimeID is specified otherwise.
+	struct InvalidTypeID : public std::runtime_error
+	{
+		InvalidTypeID(const std::string& message = "InvalidTypeID exception");
+	};
 
 	struct DF_API Status
 	{
@@ -161,22 +166,43 @@ public:
 	struct ConstParseInfo;
 	struct DF_API VTypeInfo
 	{
-		std::unordered_map<Type, size_t, TypeHasher> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
-		std::unordered_map<size_t, size_t> imports; // maps globalID (key) to localID (value)
-		std::unordered_map<size_t, size_t> exports; // maps localID (key) to globalID (value)
+		struct TypeID
+		{
+			size_t runtimeID; // the id that the TypeID is translated to at runtime
+			unsigned char sss; // size specifier specifier. ReplacesOldID is true if sss == 0
+			TypeID() = default;
+			TypeID(size_t runtimeID, unsigned char sss);
+			void saveToMemory(MemoryDataStream& mem) const;
+			void saveToMemory(MemoryDataStream& mem, unsigned char runtimeID) const;
+			unsigned char addSSS(unsigned char typeSpec) const;
+			static unsigned char smallestSSS(size_t type);
+			void matchSSS(); // selects the smallest possible sss that fits the runtimeID
+			bool operator== (const TypeID& other) const;
 
-		void addExport(size_t id); // throws VTypeDataAlreadyExists if the element already exists
-		void addExport(size_t localID, size_t globalID); // throws VTypeDataAlreadyExists if the element (localID) already exists.
-		void addImport(size_t id); // throws VTypeDataAlreadyExists if the element already exists
-		void addImport(size_t globalID, size_t localID); // throws VTypeDataAlreadyExists if the element (globalID) already exists
-		void addDefinedType(const Type& type, size_t typeID); // throws VTypeDataAlreadyExists if the element already exists
+			void operator++();
+		};
+		std::unordered_map<Type, TypeID, TypeHasher> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
+		std::unordered_map<size_t, TypeID> imports; // maps globalID (key) to localID (value)
+		std::unordered_map<size_t, TypeID> exports; // maps localID (key) to globalID (value)
+
+		void addExport(size_t id, unsigned char sss); // throws VTypeDataAlreadyExists if the element already exists
+		void addExport(size_t localID, size_t globalID, unsigned char sss); // throws VTypeDataAlreadyExists if the element (localID) already exists.
+		void addImport(size_t id, unsigned char sss); // throws VTypeDataAlreadyExists if the element already exists
+		void addImport(size_t globalID, size_t localID, unsigned char sss); // throws VTypeDataAlreadyExists if the element (globalID) already exists
+		void addDefinedType(const Type& type, size_t typeID, unsigned char sss); // throws VTypeDataAlreadyExists if the element already exists
+		void addDefinedType(const Type& type, TypeID typeID); // throws VTypeDataAlreadyExists if the element already exists
+
+		TypeID getFreeTypeID() const; // returns the smallest possible unused typeID
+		static unsigned char getNextBIOTypeID(unsigned char type = 0);
 
 		bool isAlreadyDefined(const Type& type) const;
-		std::optional<size_t> getTypeID(const Type& type) const; // returns nullopt if the type isn't defined
+		bool isAlreadyDefined(TypeID typeID) const;
+		std::optional<ODF::VTypeInfo::TypeID> getTypeID(const Type& type) const; // returns nullopt if the type isn't defined
 		bool useType(MemoryDataStream& mem, const Type& type, const ConstParseInfo& parseInfo); // Use the type with USETYPE if it is defined (return true), otherwise save it normally (return false).
-		void saveDefinedTypes(MemoryDataStream& mem);
+		void saveDefinedTypes(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const;
 		void saveImports(MemoryDataStream& mem) const;
 		void saveExports(MemoryDataStream& mem) const;
+		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const;
 	};
 
 	// not exported into the dll

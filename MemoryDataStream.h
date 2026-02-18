@@ -101,9 +101,9 @@ public:
 	char read();
 	void read(char* destination, size_t size);
 	char* read(size_t size);
-	char* data();
-	size_t size();
-	size_t sizeLeft();
+	char* data() const;
+	size_t size() const;
+	size_t sizeLeft() const;
 	template<typename T>
 	T read()
 	{

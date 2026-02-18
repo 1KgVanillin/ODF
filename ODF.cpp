@@ -2051,6 +2051,10 @@ ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 
 	ConstParseInfo parseInfo(pools, localPool, vtypeinfo);
 
+	// save virtual types that were registered during loading, if the object was loaded in the past
+	if (vtypeinfo)
+		vtypeinfo->saveToMemory(mem);
+
 	// save header
 	if (Status error = type.saveToMemory(mem, parseInfo))
 		return error;
@@ -4398,43 +4402,112 @@ ODF::Pool ODF::PoolCollection::makePool()
 
 ODF::UnresolvedImport::UnresolvedImport(const std::string& message) : runtime_error(message) {}
 
-void ODF::VTypeInfo::addExport(size_t id)
+ODF::VTypeInfo::TypeID::TypeID(size_t runtimeID, unsigned char sss) : runtimeID(runtimeID), sss(sss) {}
+
+void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem) const
+{
+	saveToMemory(mem, runtimeID);
+}
+
+void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem, unsigned char runtimeID) const
+{
+	switch (sss)
+	{
+	case 0: // uint8 and is treated as built-in type
+		std::pair id = PoolCollection::makeFullTypeID(runtimeID);
+		if (!id.second)
+			THROW InvalidTypeID();
+		mem.write<UINT_8>(id.first);
+		break;
+	case 1: // uint8
+		mem.write<UINT_8>(id.first);
+		break;
+	case 2: // uint16
+		mem.write<UINT_16>(id.first);
+		break;
+	case 3: // uint32
+		mem.write<UINT_32>(id.first);
+		break;
+	}
+}
+
+unsigned char ODF::VTypeInfo::TypeID::addSSS(unsigned char typeSpec) const
+{
+	return (sss << 6) | typeSpec;
+}
+
+unsigned char ODF::VTypeInfo::TypeID::smallestSSS(size_t type)
+{
+	if (type <= UINT8_MAX)
+		return 0;
+	if (type <= UINT16_MAX)
+		return 1;
+	if (type <= UINT32_MAX)
+		return 2;
+	return 3;
+}
+
+void ODF::VTypeInfo::TypeID::matchSSS()
+{
+	sss = smallestSSS(runtimeID);
+}
+
+bool ODF::VTypeInfo::TypeID::operator==(const TypeID& other) const
+{
+	return sss == other.sss && runtimeID == other.runtimeID;
+}
+
+void ODF::VTypeInfo::TypeID::operator++()
+{
+	runtimeID++;
+}
+
+void ODF::VTypeInfo::addExport(size_t id, unsigned char sss)
 {
 	if (exports.contains(id))
 	{
 		THROW VTypeDataAlreadyExists();
 	}
-	exports[id] = id;
+	exports[id] = TypeID(id, sss);
 }
 
-void ODF::VTypeInfo::addExport(size_t localID, size_t globalID)
+void ODF::VTypeInfo::addExport(size_t localID, size_t globalID, unsigned char sss)
 {
 	if (exports.contains(localID))
 	{
 		THROW VTypeDataAlreadyExists();
 	}
-	exports[localID] = globalID;
+	exports[localID] = TypeID(globalID, sss);
 }
 
-void ODF::VTypeInfo::addImport(size_t id)
+void ODF::VTypeInfo::addImport(size_t id, unsigned char sss)
 {
 	if (imports.contains(id))
 	{
 		THROW VTypeDataAlreadyExists();
 	}
-	imports[id] = id;
+	imports[id] = TypeID(id, sss);
 }
 
-void ODF::VTypeInfo::addImport(size_t globalID, size_t localID)
+void ODF::VTypeInfo::addImport(size_t globalID, size_t localID, unsigned char sss)
 {
 	if (imports.contains(globalID))
 	{
 		THROW VTypeDataAlreadyExists();
 	}
-	imports[globalID] = localID;
+	imports[globalID] = TypeID(localID, sss);
 }
 
-void ODF::VTypeInfo::addDefinedType(const Type& type, size_t typeID)
+void ODF::VTypeInfo::addDefinedType(const Type& type, size_t typeID, unsigned char sss)
+{
+	if (definedTypes.contains(type))
+	{
+		THROW VTypeDataAlreadyExists();
+	}
+	definedTypes[type] = TypeID(typeID, sss);
+}
+
+void ODF::VTypeInfo::addDefinedType(const Type& type, TypeID typeID)
 {
 	if (definedTypes.contains(type))
 	{
@@ -4443,12 +4516,59 @@ void ODF::VTypeInfo::addDefinedType(const Type& type, size_t typeID)
 	definedTypes[type] = typeID;
 }
 
+ODF::VTypeInfo::TypeID ODF::VTypeInfo::getFreeTypeID() const
+{
+	// first search through ids that replace built-in ones, as they are the most efficient.
+
+	int possibleSolutions = (31 - TypeSpecifier::LAST_SPEC) * 8;
+	size_t tries = 0;
+	unsigned char bio = 0;
+	while (true)
+	{
+		bio = getNextBIOTypeID();
+		tries++;
+		if (tries > possibleSolutions)
+			break;
+		if (!isAlreadyDefined(TypeID(PoolCollection::getFullTypeID(bio, true), 0)))
+			return TypeID(PoolCollection::getFullTypeID(bio, true), 0);
+	}
+
+	// search for full typeID
+	TypeID id(1, 0); // start with 1, so the loop can terminate when tries reaches UINT64_MAX, just before it overflows.
+	tries = 0;
+	while (true)
+	{
+		if (!isAlreadyDefined(id))
+			return id;
+		tries++;
+		if (tries == UINT64_MAX)
+		{
+			THROW InvalidTypeID("InvalidTypeID: ODF::VTypeInfo::getFreeID() couldn't find any free typeID. This is bug if you didn't use 9.223.372.036.854.775.807*2+1 ids");
+		}
+	}
+}
+
+unsigned char ODF::VTypeInfo::getNextBIOTypeID(unsigned char type)
+{
+	do
+		type++;
+	while (TypeSpecifier::isBuiltIn(type));
+}
+
 bool ODF::VTypeInfo::isAlreadyDefined(const Type& type) const
 {
 	return definedTypes.contains(type);
 }
 
-std::optional<size_t> ODF::VTypeInfo::getTypeID(const Type& type) const
+bool ODF::VTypeInfo::isAlreadyDefined(TypeID typeID) const
+{
+	for (const std::pair<Type, TypeID>& it : definedTypes)
+		if (it.second == typeID)
+			return true;
+	return false;
+}
+
+std::optional<ODF::VTypeInfo::TypeID> ODF::VTypeInfo::getTypeID(const Type& type) const
 {
 	try
 	{
@@ -4464,64 +4584,85 @@ bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const Cons
 {
 	try
 	{
-		size_t id = definedTypes.at(type); // try to access the id before writing anything to the stream to prevent writing of USETYPE in case of exception
-		mem.write(TypeSpecifier::USETYPE);
-		mem.write(id);
+		TypeID id = definedTypes.at(type); // try to access the id before writing anything to the stream to prevent writing of USETYPE in case of exception
+		mem.write(id.addSSS(TypeSpecifier::USETYPE));
+		id.saveToMemory(mem);
 		return true;
 	}
 	catch (std::out_of_range&)
 	{
-		// save the type directly in case it is not defined
-		type.saveToMemory(mem, parseInfo);
+		// in case the type isn't already defined, it will be defined.
+		
+		// create a TypeID
+		TypeID newID = getFreeTypeID();
+
+		// register Type
+		addDefinedType(type, newID);
+		
+		// define the type in the file
+		mem.write(newID.addSSS(TypeSpecifier::DEFTYPE));
+		newID.saveToMemory(mem); // save id
+		type.saveToMemory(mem, parseInfo); // save type
+
+		// add USETYPE so it is available as if nothing happened
+		mem.write(newID.addSSS(TypeSpecifier::USETYPE));
+		newID.saveToMemory(mem);
 		return false;
 	}
 }
 
-void ODF::VTypeInfo::saveDefinedTypes(MemoryDataStream& mem)
+void ODF::VTypeInfo::saveDefinedTypes(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const
 {
-	for (const std::pair<Type, size_t>& it : definedTypes)
+	for (const std::pair<Type, TypeID>& it : definedTypes)
 	{
-		mem.write(TypeSpecifier::DEFTYPE);
-		mem.write(it.second);
-		mem.write(it.first);
+		mem.write(it.second.addSSS(TypeSpecifier::DEFTYPE));
+		it.second.saveToMemory(mem);
+		it.first.saveToMemory(mem, parseInfo);
 	}
 }
 
 void ODF::VTypeInfo::saveImports(MemoryDataStream& mem) const
 {
 	// use IMPORTAS globalID (key) localID (value) if key and value are not the same. Otherwise use IMPORT ID
-	for (const std::pair<size_t, size_t>& it : imports)
+	for (const std::pair<size_t, TypeID>& it : imports)
 	{
-		if (it.first == it.second)
+		if (it.first == it.second.runtimeID)
 		{ // IMPORT
-			mem.write(TypeSpecifier::IMPORT);
-			mem.write(it.first);
+			mem.write(it.second.addSSS(TypeSpecifier::IMPORT));
+			it.second.saveToMemory(mem, it.first); // save the typeID it.first with the sss from it.second
 		}
 		else
 		{ // IMPORTAS
-			mem.write(TypeSpecifier::IMPORTAS);
-			mem.write(it.first);
-			mem.write(it.second);
+			mem.write(it.second.addSSS(TypeSpecifier::IMPORTAS));
+			it.second.saveToMemory(mem, it.first); // save the typeID it.first with the sss from it.second
+			it.second.saveToMemory(mem); // short for it.second.saveToMemory(mem, it.second);
 		}
 	}
 }
 
 void ODF::VTypeInfo::saveExports(MemoryDataStream& mem) const
 {
-	for (const std::pair<size_t, size_t>& it : exports)
+	for (const std::pair<size_t, TypeID>& it : exports)
 	{
-		if (it.first == it.second)
+		if (it.first == it.second.runtimeID)
 		{ // EXPORT
-			mem.write(TypeSpecifier::EXPORT);
-			mem.write(it.first);
+			mem.write(it.second.addSSS(TypeSpecifier::EXPORT));
+			it.second.saveToMemory(mem, it.first); // save the typeID it.first with the sss from it.second
 		}
 		else
 		{ // EXPORTAS
-			mem.write(TypeSpecifier::EXPORTAS);
-			mem.write(it.first);
-			mem.write(it.second);
+			mem.write(it.second.addSSS(TypeSpecifier::EXPORTAS));
+			it.second.saveToMemory(mem, it.first); // save the typeID it.first with the sss from it.second
+			it.second.saveToMemory(mem); // short for it.second.saveToMemory(mem, it.second);
 		}
 	}
+}
+
+void ODF::VTypeInfo::saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const
+{
+	saveDefinedTypes(mem, parseInfo);
+	saveImports(mem); // imports are saved before the exports in case an imported type is exported again (which wouldn't make much sense, though it is not explicitely prohibited)
+	saveExports(mem);
 }
 
 bool ODF::ParseInfo::containsInvalidPointer() const

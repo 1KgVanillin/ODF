@@ -104,6 +104,15 @@ void MemoryDataStream::deallocateDataOnDestruction(bool deallocate)
 	deallocateOnDestruction = deallocate;
 }
 
+void MemoryDataStream::enableDynamicAllocation()
+{
+	if (dynamicAllocation)
+		delete dynamicAllocation;
+	dynamicAllocation = new DynamicAllocationMetadata;
+	dynamicAllocation->vecdata.reserve(1); // reserve 1 byte, so vecdata is forced to get an address
+	start = dynamicAllocation->vecdata.data();
+}
+
 void MemoryDataStream::allocate(size_t size)
 {
 	if (selfAllocated)
@@ -163,6 +172,8 @@ void MemoryDataStream::finish()
 		finished = true;
 		if (enablePostprocessing)
 			postprocessor(dynamicAllocation->vecdata.data(), dynamicAllocation->size());
+		delete dynamicAllocation;
+		dynamicAllocation = nullptr;
 		return;
 	}
 
@@ -247,6 +258,9 @@ void MemoryDataStream::write(const char* bytes, size_t size)
 	if (dynamicAllocation)
 	{
 		dynamicAllocation->write(bytes, size);
+		// reassign start as dynamicAllocation->write has propably modified the location of the data
+		start = dynamicAllocation->vecdata.data();
+		firstInvalidAddress = start + dynamicAllocation->size();
 		return;
 	}
 
@@ -386,17 +400,17 @@ char* MemoryDataStream::read(size_t size)
 	}
 }
 
-char* MemoryDataStream::data()
+char* MemoryDataStream::data() const
 {
 	return start;
 }
 
-size_t MemoryDataStream::size()
+size_t MemoryDataStream::size() const
 {
 	return firstInvalidAddress - start;
 }
 
-size_t MemoryDataStream::sizeLeft()
+size_t MemoryDataStream::sizeLeft() const
 {
 	return firstInvalidAddress - current;
 }
@@ -421,7 +435,14 @@ void MemoryDataStream::setPrevious(char byte)
 
 MemoryDataStream::MemoryDataStream(size_t size)
 {
-	allocate(size);
+	baseinit();
+	if (size)
+		allocate(size);
+	else
+	{
+		// dynamic allocation
+		enableDynamicAllocation();
+	}
 }
 
 MemoryDataStream::MemoryDataStream(char* data)
