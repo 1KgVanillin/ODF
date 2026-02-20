@@ -90,21 +90,21 @@ int main()
 		//};
 
 		// example: define type 0x69 and export it as 0x67. Then Import the type 0x67 as 0x69 and use it. works. Also works with regular IMPORT and EXPORT
-		const unsigned char data[] = {
-			0x9ui8, // DEFTYPE, SSS1
+		const unsigned char vdata[] = {
+			0x49ui8, // DEFTYPE, SSS1
 			0x69ui8, // SSS1ID0x69
 			0x23ui8, // Type: unsigned int
 
-			0x2Aui8, // EXPORTAS
+			0x6Aui8, // EXPORTAS
 			0x69, // ID
 			0x67 // GLOBAL ID
 		};
 		const unsigned char data2[] = {
-			0x2B, // IMPORTAS
+			0x6B, // IMPORTAS
 			0x67, // GLOBAL ID
 			0x69, // ID
 
-			0x29, // USETYPE
+			0x69, // USETYPE
 			0x69, // ID
 			0x5, 0x5, 0x5, 0x5 // data
 		};
@@ -112,8 +112,8 @@ int main()
 		ODF::PoolCollection pc = ODF::PoolCollection::makePool();
 		ODF virt = odf = pc;
 
-		virt.loadFromMemory((const char*)data, sizeof(data));
-		odf.loadFromMemory((const char*)data2, sizeof(data2));
+		virt.loadFromMemory((const char*)vdata, sizeof(vdata));
+		odf.loadFromMemory((const char*)data2, sizeof(data2)); // Debugging: odf.type.immutable turns true in this function.
 
 		cout << "result:\n" << odf << "original: " << 0x05050505ui32 << "\n";
 
@@ -121,7 +121,11 @@ int main()
 		odf.saveToMemory(dynMDS);
 
 		ODF old = odf;
+		
+		//odf.resetPools();
 		odf.loadFromMemory(dynMDS.data(), dynMDS.size());
+
+		cout << "last: " << odf << "\n";
 	}
 	catch (std::runtime_error& err)
 	{

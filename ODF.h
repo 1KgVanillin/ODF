@@ -136,7 +136,7 @@ public:
 	{
 		struct TypeID
 		{
-			static constexpr unsigned char InvalidSSS = 0xFF; // In case the sss isn't needed, it is set to this value, to prevent accidental use.
+			static constexpr unsigned char WildcardSSS = 0xFF; // In case the sss isn't needed, it is set to this value, to prevent accidental use.
 			size_t runtimeID; // the id that the TypeID is translated to at runtime
 			unsigned char sss; // size specifier specifier. ReplacesOldID is true if sss == 0
 			TypeID() = default;
@@ -146,7 +146,7 @@ public:
 			unsigned char addSSS(unsigned char typeSpec) const;
 			static unsigned char smallestSSS(size_t type);
 			void matchSSS(); // selects the smallest possible sss that fits the runtimeID
-			bool operator== (const TypeID& other) const;
+			bool operator== (const TypeID& other) const; // as this function might be used in a hashmap, it will return true if runtimeID and sss are equal, or if runtimeIDs are equal and at least one sss is Wildcard.
 
 			void operator++();
 		};
@@ -953,6 +953,7 @@ public:
 	// Pool interface: do not use pools by default to increase performance on temporarily created objects or if they aren't needed.
 	std::shared_ptr<PoolCollection> pools;
 	void usePools(); // creates a valid value in the optional
+	void resetPools(); // remove all pools (deallocate pools)
 	void addPool(Pool pool);
 	void addImportPool(Pool pool);
 	void addExportPool(Pool pool);

@@ -1824,6 +1824,7 @@ ODF::Type::Type() : complexSpec(nullptr), immutable(false) {}
 
 ODF::Type::Type(MemoryDataStream& mem, const ParseInfo& parseInfo)
 {
+	immutable = false;
 	complexSpec = nullptr;
 	Status error = this->loadFromMemory(mem, parseInfo);
 	if (error)
@@ -4094,6 +4095,11 @@ void ODF::usePools()
 	pools = std::make_shared<PoolCollection>();
 }
 
+void ODF::resetPools()
+{
+	pools.reset();
+}
+
 void ODF::addPool(Pool pool)
 {
 	pools->addPool(pool);
@@ -4301,6 +4307,8 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
 				localID.sss = 3;
 				break;
+			default:
+				THROW InvalidCondition(); // to prevent compiler warning for uninitialized variable globalID in the next line.
 			}
 			exportType(globalID, localPool->at(localID));
 			vtypeinfo->addExport(localID.runtimeID, globalID.runtimeID, localID.sss);
@@ -4308,7 +4316,7 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 		}
 		catch (std::out_of_range&)
 		{
-			THROW Status::InvalidLocalTypeID;
+			THROW Status::InvalidLocalTypeID; // The typeID that should be exported wasn't found
 		}
 		break;
 	case TS::IMPORT:
@@ -4333,6 +4341,8 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
 				typeID.sss = 3;
 				break;
+			default:
+				THROW InvalidCondition(); // to prevent compiler warning for uninitialized variable typeID in the next line.
 			}
 			(*localPool)[typeID] = importType(typeID.runtimeID).value();
 			vtypeinfo->addImport(typeID.runtimeID, typeID.sss);
@@ -4369,6 +4379,8 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
 				globalID.sss = 3;
 				break;
+			default:
+				THROW InvalidCondition(); // to prevent compiler warning for uninitialized variable globalID in the next line.
 			}
 			(*localPool)[localID] = importType(globalID).value();
 			vtypeinfo->addImport(globalID.runtimeID, localID.runtimeID, globalID.sss);
@@ -4393,7 +4405,7 @@ unsigned char ODF::PoolCollection::getVTypeSizeSpec(unsigned char vtype)
 ODF::VTypeInfo::TypeID ODF::PoolCollection::getFullTypeID(UINT_32 id, bool replacesOldID)
 {
 	// return id if replacesOldID is false. return id | 0xFF00'0000'0000'0000
-	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, TypeID::InvalidSSS);
+	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, TypeID::WildcardSSS);
 }
 
 std::pair<UINT_32, bool> ODF::PoolCollection::makeFullTypeID(size_t fullTypeID)
@@ -4442,10 +4454,10 @@ void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem) const
 
 void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem, unsigned char runtimeID) const
 {
+	std::pair id = PoolCollection::makeFullTypeID(runtimeID);
 	switch (sss)
 	{
 	case 0: // uint8 and is treated as built-in type
-		std::pair id = PoolCollection::makeFullTypeID(runtimeID);
 		if (!id.second)
 			THROW InvalidTypeID();
 		mem.write<UINT_8>(id.first);
@@ -4485,7 +4497,7 @@ void ODF::VTypeInfo::TypeID::matchSSS()
 
 bool ODF::VTypeInfo::TypeID::operator==(const TypeID& other) const
 {
-	return sss == other.sss && runtimeID == other.runtimeID;
+	return (sss == other.sss || sss == WildcardSSS || other.sss == WildcardSSS)  && runtimeID == other.runtimeID;
 }
 
 void ODF::VTypeInfo::TypeID::operator++()
@@ -4524,6 +4536,10 @@ void ODF::VTypeInfo::addImport(size_t globalID, size_t localID, unsigned char ss
 {
 	if (imports.contains(globalID))
 	{
+		// ignore if the new and old value are equal
+		if (imports.at(globalID) == TypeID(localID, sss))
+			return;
+		// else throw an exception
 		THROW VTypeDataAlreadyExists();
 	}
 	imports[globalID] = TypeID(localID, sss);
@@ -4573,10 +4589,11 @@ ODF::VTypeInfo::TypeID ODF::VTypeInfo::getFreeTypeID() const
 			return id;
 		tries++;
 		if (tries == UINT64_MAX)
-		{
-			THROW InvalidTypeID("InvalidTypeID: ODF::VTypeInfo::getFreeID() couldn't find any free typeID. This is bug if you didn't use 9.223.372.036.854.775.807*2+1 ids");
-		}
+			break;
 	}
+
+	// no id was found
+	THROW InvalidTypeID("InvalidTypeID: ODF::VTypeInfo::getFreeID() couldn't find any free typeID. This is bug if you didn't use 9.223.372.036.854.775.807*2+1 ids");
 }
 
 unsigned char ODF::VTypeInfo::getNextBIOTypeID(unsigned char type)
@@ -4584,6 +4601,7 @@ unsigned char ODF::VTypeInfo::getNextBIOTypeID(unsigned char type)
 	do
 		type++;
 	while (TypeSpecifier::isBuiltIn(type));
+	return type;
 }
 
 bool ODF::VTypeInfo::isAlreadyDefined(const Type& type) const
@@ -4773,3 +4791,5 @@ size_t ODF::VTypeInfo::TypeIDHasher::operator()(const TypeID& id) const
 {
 	return std::hash<size_t>{}(id.runtimeID);
 }
+
+ODF::InvalidTypeID::InvalidTypeID(const std::string& message) : runtime_error(message) {}
