@@ -2053,7 +2053,7 @@ ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 
 	// save virtual types that were registered during loading, if the object was loaded in the past
 	if (vtypeinfo)
-		vtypeinfo->saveToMemory(mem);
+		vtypeinfo->saveToMemory(mem, parseInfo);
 
 	// save header
 	if (Status error = type.saveToMemory(mem, parseInfo))
@@ -4137,6 +4137,20 @@ std::optional<ODF::Type> ODF::PoolCollection::importType(size_t id) const
 	for (const Pool& it : importPools)
 	{
 		try {
+			return it->at(TypeID(id, 0)); // the sss is ignored in the hashmap. the hash of a a TypeID with a specific runtime id will be the same, as if the runtimeID would have been hashed alone.
+		}
+		catch (std::out_of_range&) {} // continue if element not found
+	}
+	// element not found
+	return std::nullopt;
+}
+
+std::optional<ODF::Type> ODF::PoolCollection::importType(TypeID id) const
+{
+	// search all pools for this type and return it.
+	for (const Pool& it : importPools)
+	{
+		try {
 			return it->at(id);
 		}
 		catch (std::out_of_range&) {} // continue if element not found
@@ -4145,14 +4159,14 @@ std::optional<ODF::Type> ODF::PoolCollection::importType(size_t id) const
 	return std::nullopt;
 }
 
-void ODF::PoolCollection::exportType(size_t id, const Type& type)
+void ODF::PoolCollection::exportType(TypeID id, const Type& type)
 {
 	// add the type to all exportPools
 	for (Pool& it : exportPools)
 		it->insert(std::make_pair(id, type));
 }
 
-void ODF::PoolCollection::exportType(const std::pair<size_t, const Type&>& pair)
+void ODF::PoolCollection::exportType(const std::pair<TypeID, const Type&>& pair)
 {
 	for (Pool& it : exportPools)
 		it->insert(pair);
@@ -4160,6 +4174,7 @@ void ODF::PoolCollection::exportType(const std::pair<size_t, const Type&>& pair)
 
 std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
 {
+	using TypeID = VTypeInfo::TypeID;
 	using TS = TypeSpecifier;
 
 	// parse the virtual type and return it. Only USETYPE returns a type, all other virtaul types must be callable without a body, so they do not return a type.
@@ -4171,7 +4186,7 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 
 	// declare variables for switch statement
 	Type type;
-	size_t key;
+	TypeID key;
 
 	// little note on memory mangement:
 	// The PoolCollection inherits from std::enable_shared_from_this to get access to itself in a shared_ptr.
@@ -4231,24 +4246,28 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 	case TS::EXPORT:
 		try
 		{
-			size_t typeID;
+			TypeID typeID;
 			switch (getVTypeSizeSpec(vtype))
 			{
 			case 0:
 				typeID = getFullTypeID(mem.read<UINT_8>(), true);
+				typeID.sss = 0;
 				break;
 			case 1:
 				typeID = getFullTypeID(mem.read<UINT_8>(), false);
+				typeID.sss = 1;
 				break;
 			case 2:
 				typeID = getFullTypeID(mem.read<UINT_16>(), false);
+				typeID.sss = 2;
 				break;
 			case 3:
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
+				typeID.sss = 3;
 				break;
 			}
 			exportType(typeID, localPool->at(typeID));
-			vtypeinfo->addExport(typeID);
+			vtypeinfo->addExport(typeID.runtimeID, typeID.sss);
 			return std::nullopt;
 		}
 		catch (std::out_of_range&)
@@ -4259,28 +4278,32 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 	case TS::EXPORTAS:
 		try
 		{
-			size_t localID, globalID;
+			TypeID localID, globalID;
 			switch (getVTypeSizeSpec(vtype))
 			{
 			case 0:
 				localID = getFullTypeID(mem.read<UINT_8>(), true);
 				globalID = getFullTypeID(mem.read<UINT_8>(), true);
+				localID.sss = 0; // as these two variable aren't used anywhere else than after this switch statement, it is not neccesarry to fill the sss of globalID
 				break;
 			case 1:
 				localID = getFullTypeID(mem.read<UINT_8>(), false);
 				globalID = getFullTypeID(mem.read<UINT_8>(), false);
+				localID.sss = 1;
 				break;
 			case 2:
 				localID = getFullTypeID(mem.read<UINT_16>(), false);
 				globalID = getFullTypeID(mem.read<UINT_16>(), false);
+				localID.sss = 2;
 				break;
 			case 3:
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
+				localID.sss = 3;
 				break;
 			}
 			exportType(globalID, localPool->at(localID));
-			vtypeinfo->addExport(localID, globalID);
+			vtypeinfo->addExport(localID.runtimeID, globalID.runtimeID, localID.sss);
 			return std::nullopt;
 		}
 		catch (std::out_of_range&)
@@ -4291,24 +4314,28 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 	case TS::IMPORT:
 		try
 		{
-			size_t typeID;
+			TypeID typeID;
 			switch (getVTypeSizeSpec(vtype))
 			{
 			case 0:
 				typeID = getFullTypeID(mem.read<UINT_8>(), true);
+				typeID.sss = 0;
 				break;
 			case 1:
 				typeID = getFullTypeID(mem.read<UINT_8>(), false);
+				typeID.sss = 1;
 				break;
 			case 2:
 				typeID = getFullTypeID(mem.read<UINT_16>(), false);
+				typeID.sss = 2;
 				break;
 			case 3:
 				typeID = getFullTypeID(mem.read<UINT_32>(), false);
+				typeID.sss = 3;
 				break;
 			}
-			(*localPool)[typeID] = importType(typeID).value();
-			vtypeinfo->addImport(typeID);
+			(*localPool)[typeID] = importType(typeID.runtimeID).value();
+			vtypeinfo->addImport(typeID.runtimeID, typeID.sss);
 			return std::nullopt;
 		}
 		catch (std::bad_optional_access&)
@@ -4319,28 +4346,32 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 	case TS::IMPORTAS:
 		try
 		{
-			size_t globalID, localID;
+			TypeID globalID, localID;
 			switch (getVTypeSizeSpec(vtype))
 			{
 			case 0:
 				globalID = getFullTypeID(mem.read<UINT_8>(), true);
 				localID = getFullTypeID(mem.read<UINT_8>(), true);
+				globalID.sss = 0; // as these two variable aren't used anywhere else than after this switch statement, it is not neccesarry to fill the sss of localID
 				break;
 			case 1:
 				globalID = getFullTypeID(mem.read<UINT_8>(), false);
 				localID = getFullTypeID(mem.read<UINT_8>(), false);
+				globalID.sss = 1;
 				break;
 			case 2:
 				globalID = getFullTypeID(mem.read<UINT_16>(), false);
 				localID = getFullTypeID(mem.read<UINT_16>(), false);
+				globalID.sss = 2;
 				break;
 			case 3:
 				globalID = getFullTypeID(mem.read<UINT_32>(), false);
 				localID = getFullTypeID(mem.read<UINT_32>(), false);
+				globalID.sss = 3;
 				break;
 			}
 			(*localPool)[localID] = importType(globalID).value();
-			vtypeinfo->addImport(globalID, localID);
+			vtypeinfo->addImport(globalID.runtimeID, localID.runtimeID, globalID.sss);
 			return std::nullopt;
 		}
 		catch (std::bad_optional_access&)
@@ -4359,10 +4390,10 @@ unsigned char ODF::PoolCollection::getVTypeSizeSpec(unsigned char vtype)
 	return vtype >> 6;
 }
 
-size_t ODF::PoolCollection::getFullTypeID(UINT_32 id, bool replacesOldID)
+ODF::VTypeInfo::TypeID ODF::PoolCollection::getFullTypeID(UINT_32 id, bool replacesOldID)
 {
 	// return id if replacesOldID is false. return id | 0xFF00'0000'0000'0000
-	return replacesOldID ? (id | 0xFF00'0000'0000'0000) : id;
+	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, TypeID::InvalidSSS);
 }
 
 std::pair<UINT_32, bool> ODF::PoolCollection::makeFullTypeID(size_t fullTypeID)
@@ -4529,8 +4560,8 @@ ODF::VTypeInfo::TypeID ODF::VTypeInfo::getFreeTypeID() const
 		tries++;
 		if (tries > possibleSolutions)
 			break;
-		if (!isAlreadyDefined(TypeID(PoolCollection::getFullTypeID(bio, true), 0)))
-			return TypeID(PoolCollection::getFullTypeID(bio, true), 0);
+		if (!isAlreadyDefined(PoolCollection::getFullTypeID(bio, true)))
+			return PoolCollection::getFullTypeID(bio, true);
 	}
 
 	// search for full typeID
@@ -4736,4 +4767,9 @@ size_t ODF::TypeHasher::operator()(const Type& type) const
 	size_t immutableHash = std::hash<bool>{}(type.immutable);
 	size_t typeHash = std::hash<unsigned char>{}(type.type);
 	return hash_combine(complexSpecHash, hash_combine(immutableHash, typeHash));
+}
+
+size_t ODF::VTypeInfo::TypeIDHasher::operator()(const TypeID& id) const
+{
+	return std::hash<size_t>{}(id.runtimeID);
 }

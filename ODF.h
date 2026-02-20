@@ -130,44 +130,13 @@ public:
 	{
 		size_t operator()(const Type& type) const;
 	};
-	typedef std::unordered_map<size_t, Type> PoolType;
-	typedef std::shared_ptr<PoolType> Pool;
-	struct DF_API VTypeInfo;
-	class DF_API PoolCollection : public std::enable_shared_from_this<PoolCollection> // see ODF::PoolCollection::parse in ODF.cpp for more details on enable_shared_from_this
-	{
-	public:
-		std::vector<Pool> importPools; // pools from which types are imported
-		std::vector<Pool> exportPools; // pools from which types are exported
-
-		void addImportPool(Pool pool);
-		void addExportPool(Pool pool);
-		void addPool(Pool pool); // adds as both inport and export
-
-		std::optional<Type> importType(size_t id) const; // searches the input pools
-		void exportType(size_t id, const Type& type);
-		void exportType(const std::pair<size_t, const Type&>& pair);
-
-		std::optional<Type> parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo); // working on it
-		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
-		static size_t getFullTypeID(UINT_32 id, bool replacesOldID);
-		static std::pair<UINT_32, bool> makeFullTypeID(size_t fullTypeID);
-
-		Pool operator=(Pool pool); // clears all pools, then adds 'pool' as both import and export
-		Pool operator+=(Pool pool); // adds 'pool' as both import and export
-
-		PoolCollection() = default;
-		PoolCollection(Pool pool); // adds 'pool' as import and export
-		PoolCollection(Pool importPool, Pool exportPool);
-
-		// create a new pool
-		static Pool makePool(); // destroyed automatically by shared_ptr
-	};
 
 	struct ConstParseInfo;
 	struct DF_API VTypeInfo
 	{
 		struct TypeID
 		{
+			static constexpr unsigned char InvalidSSS = 0xFF; // In case the sss isn't needed, it is set to this value, to prevent accidental use.
 			size_t runtimeID; // the id that the TypeID is translated to at runtime
 			unsigned char sss; // size specifier specifier. ReplacesOldID is true if sss == 0
 			TypeID() = default;
@@ -180,6 +149,10 @@ public:
 			bool operator== (const TypeID& other) const;
 
 			void operator++();
+		};
+		struct TypeIDHasher // hashes only the runtimeID
+		{
+			size_t operator()(const TypeID& id) const;
 		};
 		std::unordered_map<Type, TypeID, TypeHasher> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
 		std::unordered_map<size_t, TypeID> imports; // maps globalID (key) to localID (value)
@@ -204,6 +177,42 @@ public:
 		void saveExports(MemoryDataStream& mem) const;
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const;
 	};
+
+	typedef std::unordered_map<VTypeInfo::TypeID, Type, VTypeInfo::TypeIDHasher> PoolType;
+	typedef std::shared_ptr<PoolType> Pool;
+	class DF_API PoolCollection : public std::enable_shared_from_this<PoolCollection> // see ODF::PoolCollection::parse in ODF.cpp for more details on enable_shared_from_this
+	{
+	public:
+		using TypeID = VTypeInfo::TypeID;
+
+		std::vector<Pool> importPools; // pools from which types are imported
+		std::vector<Pool> exportPools; // pools from which types are exported
+
+		void addImportPool(Pool pool);
+		void addExportPool(Pool pool);
+		void addPool(Pool pool); // adds as both inport and export
+
+		std::optional<Type> importType(size_t id) const; // searches the input pools
+		std::optional<Type> importType(TypeID id) const; // searches the input pools. SSS is irrelevant
+		void exportType(TypeID id, const Type& type);
+		void exportType(const std::pair<TypeID, const Type&>& pair);
+
+		std::optional<Type> parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo); // working on it
+		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
+		static VTypeInfo::TypeID getFullTypeID(UINT_32 id, bool replacesOldID);
+		static std::pair<UINT_32, bool> makeFullTypeID(size_t fullTypeID);
+
+		Pool operator=(Pool pool); // clears all pools, then adds 'pool' as both import and export
+		Pool operator+=(Pool pool); // adds 'pool' as both import and export
+
+		PoolCollection() = default;
+		PoolCollection(Pool pool); // adds 'pool' as import and export
+		PoolCollection(Pool importPool, Pool exportPool);
+
+		// create a new pool
+		static Pool makePool(); // destroyed automatically by shared_ptr
+	};
+	
 
 	// not exported into the dll
 	struct ParseInfo
