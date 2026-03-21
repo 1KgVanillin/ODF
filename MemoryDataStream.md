@@ -85,7 +85,7 @@ This is done with either
 ```cpp
 MemoryDataStream mem(nullptr);
 ```
-or
+or for a read only stream with
 ```cpp
 MemoryDataStream mem((const char*)nullptr);
 ```
