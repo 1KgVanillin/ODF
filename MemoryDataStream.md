@@ -44,7 +44,9 @@ Using the last construction method from above, the MemoryDataStream can be const
 ```cpp
 std::vector<char> data;
 // fill vector
+
 // get addresses from iterators
+// .data() and .size() can also be used.
 MemoryDataStream(&(*data.begin()), &(*data.end()));
 ```
 
