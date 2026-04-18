@@ -32,9 +32,12 @@ void fill(std::vector<T>& vec, size_t size, std::function<T(void)> functor)
 
 // current debug TODO 
 
+void pse();
 
 int main()
 {
+	pse();
+	return 0;
 	try {
 
 		// Data type test code
@@ -78,7 +81,7 @@ int main()
 		//	0x5, 0x5, 0x5, 0x5 // data
 		//};
 
-		// example: define the type 0x69 as extension to the built in types. as unsigned int and use it. works
+		// example: define the type 0x69 as extension to the built in types as unsigned int and use it. works
 		//const unsigned char data[] = {
 		//	0x9ui8, // DEFTYPE, SSS0
 		//	0x6Eui8, // SSS0ID0x6E

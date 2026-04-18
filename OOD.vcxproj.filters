@@ -24,6 +24,12 @@
     <ClCompile Include="MemoryDataStream.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
+    <ClCompile Include="pse.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="OdfInline.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OODErrorCodes.h">
@@ -39,6 +45,9 @@
       <Filter>Headerdateien</Filter>
     </ClInclude>
     <ClInclude Include="Definitions.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="OdfInline.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
   </ItemGroup>

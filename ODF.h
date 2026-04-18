@@ -114,7 +114,7 @@ public:
 			ParseError
 		} content;
 
-		operator bool();
+		operator Value();
 		bool operator!();
 		bool operator!=(Status other);
 		bool operator!=(Value other);
@@ -217,6 +217,9 @@ public:
 	// not exported into the dll
 	struct ParseInfo
 	{
+		std::optional<Type> importType(size_t id) const; // searches the input pools. Same as PoolCollection::import but searches in the localPool first
+		std::optional<Type> importType(PoolCollection::TypeID id) const; // searches the input pools. SSS is irrelevant. Same as PoolCollection::import but searches in the localPool first
+
 		bool containsInvalidPointer() const;
 		std::shared_ptr<PoolType>& guarateeLocalPool(); // make sure localPool points to a valid pool. Returns a reference to the shared_ptr. Referece becomes invalid if the ParseInfo object is destroyed.
 		std::shared_ptr<PoolCollection>& guaranteePoolCollection(); // make sure pools points to a valid PoolCollection. Returns a reference to the shared_ptr. Referece becomes invalid if the ParseInfo object is destroyed.

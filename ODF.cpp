@@ -139,7 +139,8 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& pa
 			// try importing the type from a pool
 			try
 			{
-				*this = parseInfo.pools->importType(PoolCollection::getFullTypeID(byte, true)).value();
+				*this = parseInfo.importType(PoolCollection::getFullTypeID(byte, true)).value();
+				return Status::Ok;
 			}
 			catch (std::bad_optional_access&)
 			{
@@ -2385,7 +2386,7 @@ ODF::Status ODF::loadArray(MemoryDataStream& mem)
 	return Status::Ok;
 }
 
-ODF::Status::operator bool()
+ODF::Status::operator Value()
 {
 	return content;
 }
@@ -4153,6 +4154,7 @@ std::optional<ODF::Type> ODF::PoolCollection::importType(size_t id) const
 
 std::optional<ODF::Type> ODF::PoolCollection::importType(TypeID id) const
 {
+	// search the local pool as it is always preferred
 	// search all pools for this type and return it.
 	for (const Pool& it : importPools)
 	{
@@ -4712,6 +4714,19 @@ void ODF::VTypeInfo::saveToMemory(MemoryDataStream& mem, const ConstParseInfo& p
 	saveDefinedTypes(mem, parseInfo);
 	saveImports(mem); // imports are saved before the exports in case an imported type is exported again (which wouldn't make much sense, though it is not explicitely prohibited)
 	saveExports(mem);
+}
+
+std::optional<ODF::Type> ODF::ParseInfo::importType(size_t id) const
+{
+	return importType(PoolCollection::TypeID(id, 0));
+}
+
+std::optional<ODF::Type> ODF::ParseInfo::importType(ODF::PoolCollection::TypeID id) const
+{
+	auto it = localPool->find(id);
+	if (it != localPool->end())
+		return it->second;
+	pools->importType(id);
 }
 
 bool ODF::ParseInfo::containsInvalidPointer() const
