@@ -7,8 +7,8 @@
 #include <fstream>
 #include <cstdint>
 #include <vector>
-#include <unordered_map>
 #include <map>
+#include <unordered_map>
 #include <variant>
 #include <iostream>
 #include <algorithm>
@@ -96,6 +96,16 @@ public:
 	struct InvalidTypeID : public std::runtime_error
 	{
 		InvalidTypeID(const std::string& message = "InvalidTypeID exception");
+	};
+
+	struct DF_API PrettyPrintInfo
+	{
+		unsigned short indent;
+
+		void pre(std::ostream& out);
+		void post(std::ostream& out);
+
+		PrettyPrintInfo();
 	};
 
 	struct DF_API Status
@@ -429,7 +439,7 @@ public:
 		const Type* getFixType() const; // returns the fixtype if the current type is complex and fixed. otherwise returns nullptr
 		TypeClass getTypeClass() const;
 		const std::vector<Type>* getArrayTypes() const; // returns the types vector of the mixed array specifier if mixed, otherwise nullptr
-		const std::map<std::string, Type>* getObjectTypes() const; // returns the types vector of the mixed object specifier if mixed, otherwise nullptr
+		const std::unordered_map<std::string, Type>* getObjectTypes() const; // returns the types vector of the mixed object specifier if mixed, otherwise nullptr
 		void setSSS(unsigned char sss);
 		void destroyComplexSpec();
 		void makeComplexSpec(); // memory leak safe. Makes sure complexSpec is valid, keeps the old one if one is already existing
@@ -481,7 +491,8 @@ public:
 	struct DF_API MixedObjectSpecifier : public AbstractDataObject
 	{
 		typedef const std::pair<std::string, Type>& ObjectIterator;
-		std::map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
+		std::unordered_map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
+		std::vector<std::string> iterationOrder;
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
@@ -501,9 +512,9 @@ public:
 	{
 	public:
 		typedef std::pair<const std::string, ODF> Pair;
-		typedef std::map<std::string, ODF>::const_iterator ConstIterator;
-		typedef std::map<std::string, ODF>::iterator Iterator;
-		typedef std::map<std::string, ODF>::const_iterator::value_type IteratorType;
+		typedef std::unordered_map<std::string, ODF>::const_iterator ConstIterator;
+		typedef std::unordered_map<std::string, ODF>::iterator Iterator;
+		typedef std::unordered_map<std::string, ODF>::const_iterator::value_type IteratorType;
 
 		virtual void insert(const std::string& key, const ODF& odf) = 0;
 		virtual void insert(const Pair& value) = 0;
@@ -526,13 +537,13 @@ public:
 		virtual Iterator begin() noexcept = 0;
 		virtual ConstIterator end() const noexcept = 0;
 		virtual Iterator end() noexcept = 0;
-		virtual std::map<std::string, ODF>& getObjectContainer() = 0;
+		virtual std::unordered_map<std::string, ODF>& getObjectContainer() = 0;
 
 		// order:
 		// update the keys, save the specifier, save the object.
 		// or loadFromMemory with specifier (load specifier, then load object)
 		virtual void updateKeys(ObjectSpecifier& spec) const = 0;
-		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
+		virtual void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const = 0;
 		virtual void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) = 0;
 	};
 
@@ -543,7 +554,7 @@ public:
 	public:
 		class DF_API FixedObject : public AbstractObject
 		{
-			std::map<std::string, ODF> map;
+			std::unordered_map<std::string, ODF> map;
 			Type fixType;
 		public:
 			void insert(const std::string& key, const ODF& odf) override;
@@ -567,15 +578,15 @@ public:
 			Iterator begin() noexcept override;
 			ConstIterator end() const noexcept override;
 			Iterator end() noexcept override;
-			std::map<std::string, ODF>& getObjectContainer() override;
+			std::unordered_map<std::string, ODF>& getObjectContainer() override;
 
 			void setType(const Type& type); bool isConvertableTo(const Type& newFixType) const; // newFixType must be the new fix type, aka the type that is contained in the array, not the array type itself
 			bool convertTo(const Type& type);
-			bool convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter);
+			bool convertTo(std::function<Type(const std::unordered_map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter);
 			const Type& getType() const; // returns the type of the elements contained in the object
 			
 			void updateKeys(ObjectSpecifier& spec) const override;
-			void saveToMemory(MemoryDataStream& mem) const override;
+			void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const override;
 			void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
 
 			FixedObject();
@@ -616,7 +627,7 @@ public:
 
 		class DF_API MixedObject : public AbstractObject
 		{
-			std::map<std::string, ODF> map;
+			std::unordered_map<std::string, ODF> map;
 		public:
 			void insert(const std::string& key, const ODF& odf) override;
 			void insert(const Pair& value) override;
@@ -639,10 +650,10 @@ public:
 			Iterator begin() noexcept override;
 			ConstIterator end() const noexcept override;
 			Iterator end() noexcept override;
-			std::map<std::string, ODF>& getObjectContainer() override;
+			std::unordered_map<std::string, ODF>& getObjectContainer() override;
 
 			void updateKeys(ObjectSpecifier& spec) const override;
-			void saveToMemory(MemoryDataStream& mem) const override;
+			void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const override;
 			void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
 
 			MixedObject();
@@ -675,10 +686,10 @@ public:
 		Iterator begin() noexcept override;
 		ConstIterator end() const noexcept override;
 		Iterator end() noexcept override;
-		std::map<std::string, ODF>& getObjectContainer() override;
+		std::unordered_map<std::string, ODF>& getObjectContainer() override;
 
 		void updateKeys(ObjectSpecifier& spec) const override;
-		void saveToMemory(MemoryDataStream& mem) const override;
+		void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const override;
 		void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
 
 		void clearAndFix(); // clear and make fixed
@@ -1068,6 +1079,12 @@ public:
 	friend std::ostream& operator<<(std::ostream& out, const List& list);
 	friend std::ostream& operator<<(std::ostream& out, const std::wstring& wstr);
 	friend std::ostream& operator<<(std::ostream& out, const Type& type);
+
+	// print functios, higher level than operators because of PrettyPrintInfo. PrettyPrintInfo is not taken by reference or shared_ptr on purpose as it is very small and modified in almost every stack movement (indentation)
+	static std::ostream& print(std::ostream& out, const ODF& odf, PrettyPrintInfo ppi);
+	static std::ostream& print(std::ostream& out, const Object& obj, PrettyPrintInfo ppi);
+	static std::ostream& print(std::ostream& out, const List& list, PrettyPrintInfo ppi);
+	static std::ostream& print(std::ostream& out, const Type& type, PrettyPrintInfo ppi);
 
 	// generic functions
 	ODF& immutable(); // makes the object type immutable and returns a reference to itself. Used in the implementation of access operators

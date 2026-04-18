@@ -325,21 +325,7 @@ bool operator!=(const ODF::List& arr1, const ODF::List& arr2)
 
 std::ostream& operator<<(std::ostream& out, const ODF& odf)
 {
-	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << (odf.printType ? "[BYTE] " : "") << (signed short)*ptr << "\n"; }
-	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << (odf.printType ? "[UBYTE] " : "") << (signed short)*ptr << "\n"; }
-	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << (odf.printType ? "[SHORT] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << (odf.printType ? "[USHORT] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << (odf.printType ? "[INT] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << (odf.printType ? "[UINT] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << (odf.printType ? "[LONG] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << (odf.printType ? "[ULONG] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<float>(&odf.content)) { out << (odf.printType ? "[FLOAT] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<double>(&odf.content)) { out << (odf.printType ? "[DOUBLE] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << (odf.printType ? "[CSTR] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << (odf.printType ? "[WSTR] " : "") << *ptr << "\n"; }
-	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { out << (odf.printType ? "[OBJ] " : "") << *ptr; }
-	if (auto ptr = std::get_if<ODF::List>(&odf.content)) { out << (odf.printType ? "[LIST] " : "") << *ptr; }
-	return out;
+	return ODF::print(out, odf, ODF::PrettyPrintInfo());
 }
 
 std::ostream& operator<<(std::ostream& out, const ODF::Object& obj)
@@ -445,6 +431,164 @@ std::ostream& operator<<(std::ostream& out, const ODF::Type& type)
 	//case TS::FXOBJ: out << "FXOBJ(" << std::get<ODF::FixedObjectSpecifier>(*type.obj).header << ")"; return out;
 	case TS::MXOBJ: out << "MXOBJ"; return out;
 	case TS::FXLIST: out << "FXLST"; return out;
+	}
+	return out;
+}
+
+std::ostream& ODF::print(std::ostream& out, const ODF& odf, ODF::PrettyPrintInfo ppi)
+{
+	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << (odf.printType ? "[BYTE] " : "") << (signed short)*ptr; }
+	if (auto ptr = std::get_if<UINT_8>(&odf.content)) { out << (odf.printType ? "[UBYTE] " : "") << (signed short)*ptr; }
+	if (auto ptr = std::get_if<INT_16>(&odf.content)) { out << (odf.printType ? "[SHORT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_16>(&odf.content)) { out << (odf.printType ? "[USHORT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<INT_32>(&odf.content)) { out << (odf.printType ? "[INT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_32>(&odf.content)) { out << (odf.printType ? "[UINT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<INT_64>(&odf.content)) { out << (odf.printType ? "[LONG] " : "") << *ptr; }
+	if (auto ptr = std::get_if<UINT_64>(&odf.content)) { out << (odf.printType ? "[ULONG] " : "") << *ptr; }
+	if (auto ptr = std::get_if<float>(&odf.content)) { out << (odf.printType ? "[FLOAT] " : "") << *ptr; }
+	if (auto ptr = std::get_if<double>(&odf.content)) { out << (odf.printType ? "[DOUBLE] " : "") << *ptr; }
+	if (auto ptr = std::get_if<std::string>(&odf.content)) { out << (odf.printType ? "[CSTR] " : "") << *ptr; }
+	if (auto ptr = std::get_if<std::wstring>(&odf.content)) { out << (odf.printType ? "[WSTR] " : "") << *ptr; }
+	if (auto ptr = std::get_if<ODF::Object>(&odf.content)) { print(out << (odf.printType ? "[VT_OBJ] " : ""), *ptr, ppi); }
+	if (auto ptr = std::get_if<ODF::List>(&odf.content)) { print(out << (odf.printType ? "[VT_LIST] " : ""), *ptr, ppi); }
+	return out;
+}
+
+std::ostream& ODF::print(std::ostream& out, const ODF::Object& obj, ODF::PrettyPrintInfo ppi)
+{
+	if (obj.isMixed())
+	{
+		out << "<MX>\n";
+		if (!obj.size())
+		{
+			out << "EMPTY\n";
+			return out;
+		}
+		ppi.indent++;
+		for (size_t i = 0; const ODF::Pair& it : obj)
+		{
+			ppi.pre(out);
+			print(out << "[\"" << it.first << "\"]:  ", it.second, ppi);
+			if (i != obj.size() - 1)
+				out << "\n";
+			ppi.post(out);
+			i++;
+		}
+		ppi.indent--;
+		ppi.post(out);
+	}
+	else
+	{
+		out << "<FX(" << obj.getFixedDatatype() << ")>\n";
+		if (!obj.size())
+		{
+			out << "EMPTY\n";
+			return out;
+		}
+		ppi.post(out);
+
+		ODF_THREADSAFE_PRINT;
+		ODF_DISABLE_TYPE_PRINT;
+
+		//
+		// TODO
+		// The error in the for loop below is that ODF::Object also inherits the AbstractObject::map, although it should only be present in the Fixed and Mixed Object Implemetatio.
+		// But with this error, the for loop iterates over the Object::map and not Object::AbstractObject map, which is empty because never accessed
+		//
+
+		ppi.indent++;
+		for (size_t i = 0; const ODF::Pair& it : obj)
+		{
+			ppi.pre(out);
+			print(out << "[\"" << it.first << "\"]:  ", it.second, ppi);
+			if (i != obj.size() - 1)
+				out << "\n";
+			ppi.post(out);
+			i++;
+		}
+		ppi.indent--;
+
+		ODF_RESTORE_TYPE_PRINT;
+	}
+	return out;
+}
+
+std::ostream& ODF::print(std::ostream& out, const ODF::List& list, ODF::PrettyPrintInfo ppi)
+{
+	ppi.pre(out);
+	if (list.isMixed())
+	{
+		out << "<MX>\n";
+		if (!list.size())
+		{
+			out << "EMPTY\n";
+			return out;
+		}
+		size_t i = 0;
+		ppi.indent++;
+		for (size_t i = 0;  const ODF& odf : const_cast<ODF::List&>(list)) // bruh
+		{
+			ppi.pre(out);
+			print(out << i++ << ": ", odf, ppi);
+			if (i != list.size() - 1)
+				out << "\n";
+			ppi.post(out);
+			i++;
+		}
+		ppi.indent--;
+	}
+	else
+	{
+		out << "<FX(" << list.getFixedDatatype() << ")>\n";
+		if (!list.size())
+		{
+			out << "EMPTY\n";
+			return out;
+		}
+
+		ODF_THREADSAFE_PRINT;
+		ODF_DISABLE_TYPE_PRINT;
+
+		size_t i = 0;
+		ppi.indent++;
+		for (size_t i = 0; const ODF& odf : list) // bruh
+		{
+			ppi.pre(out);
+			print(out << i++ << ": ", odf, ppi);
+			if (i != list.size() - 1)
+				out << "\n";
+			ppi.post(out);
+		}
+		ppi.indent--;
+
+		ODF_RESTORE_TYPE_PRINT;
+	}
+
+	ppi.post(out);
+	return out;
+}
+
+std::ostream& ODF::print(std::ostream& out, const ODF::Type& type, ODF::PrettyPrintInfo ppi)
+{
+	using TS = ODF::TypeSpecifier;
+	switch (type.getswitch())
+	{
+	case TS::BYTE: out << "BYTE"; return out;
+	case TS::UBYTE: out << "UBYTE"; return out;
+	case TS::SHORT: out << "UBYTE"; return out;
+	case TS::USHORT: out << "USHORT"; return out;
+	case TS::INT: out << "INT"; return out;
+	case TS::UINT: out << "UINT"; return out;
+	case TS::LONG: out << "LONG"; return out;
+	case TS::ULONG: out << "ULONG"; return out;
+	case TS::FLOAT: out << "FLOAT"; return out;
+	case TS::DOUBLE: out << "DOUBLE"; return out;
+	case TS::CSTR: out << "CSTR"; return out;
+	case TS::WSTR: out << "WSTR"; return out;
+	case TS::FXOBJ: out << "FXOBJ(" << std::get<ODF::FixedObjectSpecifier>(std::get<ODF::ObjectSpecifier>(*type.complexSpec)).fixType << ")"; return out;
+	case TS::MXOBJ: out << "MXOBJ"; return out;
+	case TS::FXLIST: out << "FXLST(" << std::get<ODF::FixedArraySpecifier>(std::get<ODF::ArraySpecifier>(*type.complexSpec)).fixType << ")"; return out;
+	case TS::MXLIST: out << "MXLST"; return out;
 	}
 	return out;
 }
@@ -691,7 +835,7 @@ const std::vector<ODF::Type>* ODF::Type::getArrayTypes() const
 	return &std::get<MixedArraySpecifier>(std::get<ArraySpecifier>(*complexSpec)).types;
 }
 
-const std::map<std::string, ODF::Type>* ODF::Type::getObjectTypes() const
+const std::unordered_map<std::string, ODF::Type>* ODF::Type::getObjectTypes() const
 {
 	if (!isMixed() || !isObject())
 		return nullptr;
@@ -1910,12 +2054,12 @@ void ODF::MixedObjectSpecifier::saveToMemory(MemoryDataStream& mem, const ConstP
 	// CSTR key
 	// TypeHeader value
 	// empty key (just null terminator) = end of specifier
-	for (ObjectIterator it : properties)
+	for (const auto& it : iterationOrder)
 	{
 		// save key
-		mem.writeStr(it.first);
+		mem.writeStr(it);
 		// save type
-		it.second.saveToMemory(mem, parseInfo);
+		properties.at(it).saveToMemory(mem, parseInfo);
 	}
 	// save zero to end object specifier
 	mem.write<UINT_8>(0);
@@ -1932,6 +2076,7 @@ void ODF::MixedObjectSpecifier::loadFromMemory(MemoryDataStream& mem, const Pars
 		Type type;
 		type.loadFromMemory(mem, parseInfo);
 		properties[key] = type;
+		iterationOrder.push_back(key);
 	}
 	mem.skip(); // skip null terminator that was peeked in the header of the while loop
 }
@@ -2612,7 +2757,7 @@ void ODF::insert(const Pair& value)
 	}
 }
 
-void ODF::insert(const std::map<std::string, ODF>& map)
+void ODF::insert(const std::unordered_map<std::string, ODF>& map)
 {
 	try {
 		std::get<Object>(content).insert(map);
@@ -2623,7 +2768,7 @@ void ODF::insert(const std::map<std::string, ODF>& map)
 	}
 }
 
-void ODF::insert(const std::unordered_map<std::string, ODF>& umap)
+void ODF::insert(const std::map<std::string, ODF>& umap)
 {
 	try {
 		std::get<Object>(content).insert(umap);
@@ -3107,10 +3252,10 @@ void ODF::Object::loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& s
 		object.emplace<MixedObject>().loadFromMemory(mem, spec);
 }
 
-void ODF::Object::saveToMemory(MemoryDataStream& mem) const
+void ODF::Object::saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const
 {
-	std::visit([&mem](const AbstractObject& aobj) {
-		aobj.saveToMemory(mem);
+	std::visit([&mem, &spec](const AbstractObject& aobj) {
+		aobj.saveToMemory(mem, spec);
 		}, object);
 }
 
@@ -3149,7 +3294,7 @@ ODF::Object::Iterator ODF::Object::end() noexcept
 		}, object);
 }
 
-std::map<std::string, ODF>& ODF::Object::getObjectContainer()
+std::unordered_map<std::string, ODF>& ODF::Object::getObjectContainer()
 {
 	if (auto ptr = std::get_if<FixedObject>(&object))
 		return ptr->map;
@@ -3559,11 +3704,12 @@ void ODF::Object::MixedObject::updateKeys(ObjectSpecifier& spec) const
 		mspec.properties[it.first] = it.second.type;
 }
 
-void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem) const
+void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const
 {
 	// save bodies seperately
-	for (const IteratorType& it : map)
-		it.second.saveBody(mem);
+	const MixedObjectSpecifier& mspec = std::get<MixedObjectSpecifier>(spec);
+	for (const auto& it : mspec.iterationOrder)
+		map.at(it).saveBody(mem);
 }
 
 void ODF::Object::MixedObject::loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec)
@@ -3573,10 +3719,10 @@ void ODF::Object::MixedObject::loadFromMemory(MemoryDataStream& mem, const Objec
 
 	// add all keys and their type, while simultaniously loading the elements in the correct order
 	const MixedObjectSpecifier& mspec = std::get<MixedObjectSpecifier>(spec);
-	for (const std::pair<std::string, Type>& it : mspec.properties)
+	for (const auto& it : mspec.iterationOrder)
 	{
-		ODF& newElement = map[it.first];
-		newElement.type = it.second;
+		ODF& newElement = map[it];
+		newElement.type = mspec.properties.at(it);
 		newElement.loadBody(mem);
 	}
 }
@@ -3707,7 +3853,7 @@ ODF::Object::Iterator ODF::Object::FixedObject::end() noexcept
 	return map.end();
 }
 
-std::map<std::string, ODF>& ODF::Object::FixedObject::getObjectContainer()
+std::unordered_map<std::string, ODF>& ODF::Object::FixedObject::getObjectContainer()
 {
 	return map;
 }
@@ -3762,7 +3908,7 @@ bool ODF::Object::FixedObject::convertTo(const Type& type)
 	return true;
 }
 
-bool ODF::Object::FixedObject::convertTo(std::function<Type(const std::map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter)
+bool ODF::Object::FixedObject::convertTo(std::function<Type(const std::unordered_map<std::string, ODF>&)> type, std::function<void(ODF& odf)> converter)
 {
 	fixType = type(map);
 	for (IteratorType& pair : map)
@@ -3785,11 +3931,12 @@ void ODF::Object::FixedObject::updateKeys(ObjectSpecifier& spec) const
 		fspec.keys.push_back(it.first);
 }
 
-void ODF::Object::FixedObject::saveToMemory(MemoryDataStream& mem) const
+void ODF::Object::FixedObject::saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const
 {
 	// save bodies seperately
-	for (const IteratorType& it : map)
-		it.second.saveBody(mem);
+	const FixedObjectSpecifier& fspec = std::get<FixedObjectSpecifier>(spec);
+	for (const auto& it : fspec.keys)
+		map.at(it).saveBody(mem);
 }
 
 void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec)
@@ -3799,6 +3946,7 @@ void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem, const Objec
 
 	// add all keys, and load all bodies in the same order
 	const FixedObjectSpecifier& fspec = std::get<FixedObjectSpecifier>(spec);
+	fixType = fspec.fixType;
 	for (const std::string& it : fspec.keys)
 	{
 		ODF& newElement = map[it];
@@ -3978,7 +4126,7 @@ ODF::Object::Iterator ODF::Object::MixedObject::end() noexcept
 	return map.end();
 }
 
-std::map<std::string, ODF>& ODF::Object::MixedObject::getObjectContainer()
+std::unordered_map<std::string, ODF>& ODF::Object::MixedObject::getObjectContainer()
 {
 	return map;
 }
@@ -4808,3 +4956,22 @@ size_t ODF::VTypeInfo::TypeIDHasher::operator()(const TypeID& id) const
 }
 
 ODF::InvalidTypeID::InvalidTypeID(const std::string& message) : runtime_error(message) {}
+
+void ODF::PrettyPrintInfo::pre(std::ostream& out)
+{
+	for (int i = 0; i < indent; i++)
+	{
+		if (i == indent - 1)
+			out << "+--";
+		else
+			out << "|  ";
+	}
+}
+
+void ODF::PrettyPrintInfo::post(std::ostream& out)
+{
+}
+
+ODF::PrettyPrintInfo::PrettyPrintInfo() : indent(0)
+{
+}
