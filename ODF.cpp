@@ -2457,7 +2457,7 @@ ODF::Status ODF::saveBody(MemoryDataStream& mem) const
 
 ODF::Status ODF::saveObject(MemoryDataStream& mem) const
 {
-	std::get<Object>(content).saveToMemory(mem);
+	std::get<Object>(content).saveToMemory(mem, std::get<ObjectSpecifier>(*type.complexSpec));
 	return Status::Ok;
 }
 
