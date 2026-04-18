@@ -44,7 +44,9 @@ Using the last construction method from above, the MemoryDataStream can be const
 ```cpp
 std::vector<char> data;
 // fill vector
+
 // get addresses from iterators
+// .data() and .size() can also be used.
 MemoryDataStream(&(*data.begin()), &(*data.end()));
 ```
 
@@ -83,7 +85,7 @@ This is done with either
 ```cpp
 MemoryDataStream mem(nullptr);
 ```
-or
+or for a read only stream with
 ```cpp
 MemoryDataStream mem((const char*)nullptr);
 ```
