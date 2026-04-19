@@ -20,6 +20,8 @@ json elemet example
 	}
 }
 
+{ "name" : "Hydrogen", "symbol" : "H", "appereance": "colorless gas", "atomic_mass" : { "val" : 1.008, "unit" : "u" }, "cid" : "CID783", "cas" : "12385-13-6", "image" : { "url" : "https://upload.wikimedia.org/wikipedia/commons/8/83/Hydrogen_discharge_tube.jpg", "caption" : "<a href=\"https://commons.wikimedia.org/wiki/File:Hydrogen_discharge_tube.jpg\">Alchemist-hp (talk) (www.pse-mendelejew.de)</a>, FAL, via Wikimedia Commons" } }
+
 */
 
 void pse()
@@ -74,9 +76,16 @@ void pse()
 	};
 
 	auto [data, size] = CreateRawData(rodf);
+
+	std::ofstream out("old.odf", std::ios::binary);
+	out.write(data.get(), size);
+	out.close();
+
 	ODF element;
 	const char* dbg = data.get();
 	element.loadFromMemory(data.get(), size);
 
 	std::cout << element << "\n";
+
+	element.saveToFile("element.odf");
 }

@@ -21,7 +21,7 @@
 #endif
 
 #ifndef DEV
-#ifdef EXPORT
+#ifdef ODF_EXPORT
 #define DF_API __declspec(dllexport)
 #else
 #define DF_API __declspec(dllimport)

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <functional>
 #include <optional>
+#include <filesystem>
 
 #define ODF_THREADSAFE
 #ifdef ODF_THREADSAFE
@@ -121,6 +122,8 @@ public:
 			FileOpenError,
 			RWError,
 			FileCloseError,
+			FileWriteError,
+			FileReadError,
 			ParseError
 		} content;
 
@@ -152,7 +155,7 @@ public:
 			TypeID() = default;
 			TypeID(size_t runtimeID, unsigned char sss);
 			void saveToMemory(MemoryDataStream& mem) const;
-			void saveToMemory(MemoryDataStream& mem, unsigned char runtimeID) const;
+			void saveToMemory(MemoryDataStream& mem, size_t runtimeID) const;
 			unsigned char addSSS(unsigned char typeSpec) const;
 			static unsigned char smallestSSS(size_t type);
 			void matchSSS(); // selects the smallest possible sss that fits the runtimeID
@@ -209,6 +212,8 @@ public:
 
 		std::optional<Type> parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo); // working on it
 		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
+		static VTypeInfo::TypeID getFullTypeID(UINT_8 id, bool replacesOldID);
+		static VTypeInfo::TypeID getFullTypeID(UINT_16 id, bool replacesOldID);
 		static VTypeInfo::TypeID getFullTypeID(UINT_32 id, bool replacesOldID);
 		static std::pair<UINT_32, bool> makeFullTypeID(size_t fullTypeID);
 
@@ -1201,8 +1206,8 @@ public:
 	Status saveToFile(std::string file);
 	Status loadFromFile(std::string file);
 
-	Status saveToStream(std::ostream& out, bool binary = true);
-	Status loadFromStream(std::istream& in, bool binary = true);
+	Status saveToStream(std::ostream& out);
+	Status loadFromStream(std::istream& in);
 
 private:
 	Status saveBody(MemoryDataStream& mem) const;

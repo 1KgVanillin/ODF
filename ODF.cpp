@@ -10,6 +10,28 @@ unsigned char ODF::Config::DefaultIntegerMergeSize = 0;
 ODF::ComplexExplicitor::OBJSTRUCT ODF::__MOBJ{};
 ODF::ComplexExplicitor::FOBJSTRUCT ODF::__FOBJ{};
 
+// little istream helper
+std::vector<char> read_all_bytes(std::istream& input) {
+	std::vector<char> buffer;
+
+	// If it's a file, we can pre-allocate
+	// (This works even if 'input' is passed as a generic istream)
+	input.seekg(0, std::ios::end);
+	auto size = input.tellg();
+	if (size > 0) {
+		input.seekg(0, std::ios::beg);
+		buffer.resize(static_cast<size_t>(size));
+		input.read(buffer.data(), size);
+	}
+	else {
+		// Fallback for non-seekable streams (like cin)
+		buffer.assign(std::istreambuf_iterator<char>(input),
+			std::istreambuf_iterator<char>());
+	}
+
+	return buffer; // No std::move needed!
+}
+
 #pragma region specifiers
 void ODF::Type::makeImmutable()
 {
@@ -2383,21 +2405,68 @@ ODF::Status ODF::loadFromMemory(const char* data, size_t size)
 
 ODF::Status ODF::saveToFile(std::string file)
 {
+	MemoryDataStream mem;
+	saveToMemory(mem);
+	
+	std::ofstream out(file, std::ios::binary);
+	if (!out)
+		return Status::FileOpenError;
+	
+	out.write(mem.data(), mem.size());
+	if (!out)
+	{
+		out.close();
+		return Status::FileWriteError;
+	}
+
+	out.close();
+	if (!out)
+		return Status::FileCloseError;
+
 	return Status::Ok;
 }
 
 ODF::Status ODF::loadFromFile(std::string file)
 {
+	std::ifstream in(file, std::ios::binary);
+	if (!in)
+		return Status::FileOpenError;
+
+	size_t size = std::filesystem::file_size(file);
+	char* data = new char[size];
+	
+	in.read(data, size);
+	if (!in)
+	{
+		delete[] data;
+		in.close();
+		return Status::FileReadError;
+	}
+
+	in.close();
+	if (!in)
+		return Status::FileCloseError;
+
+	loadFromMemory(data, size);
+	delete[] data;
 	return Status::Ok;
 }
 
-ODF::Status ODF::saveToStream(std::ostream& out, bool binary)
+ODF::Status ODF::saveToStream(std::ostream& out)
 {
+	MemoryDataStream mem;
+	saveToMemory(mem);
+
+	out.write(mem.data(), mem.size());
 	return Status::Ok;
 }
 
-ODF::Status ODF::loadFromStream(std::istream& in, bool binary)
+ODF::Status ODF::loadFromStream(std::istream& in)
 {
+	// the vector should not be copied because NRVO
+	std::vector<char> data = read_all_bytes(in);
+	MemoryDataStream mem(data.data(), data.size());
+	loadFromMemory(mem);
 	return Status::Ok;
 }
 
@@ -4552,15 +4621,28 @@ unsigned char ODF::PoolCollection::getVTypeSizeSpec(unsigned char vtype)
 	return vtype >> 6;
 }
 
+ODF::VTypeInfo::TypeID ODF::PoolCollection::getFullTypeID(UINT_8 id, bool replacesOldID)
+{
+	// return id if replacesOldID is false. else return id | 0xFF00'0000'0000'0000
+	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, !replacesOldID);
+}
+
+ODF::VTypeInfo::TypeID ODF::PoolCollection::getFullTypeID(UINT_16 id, bool replacesOldID)
+{
+	// return id if replacesOldID is false. else return id | 0xFF00'0000'0000'0000
+	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, replacesOldID ? 0 : 2);
+}
+
 ODF::VTypeInfo::TypeID ODF::PoolCollection::getFullTypeID(UINT_32 id, bool replacesOldID)
 {
-	// return id if replacesOldID is false. return id | 0xFF00'0000'0000'0000
-	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, TypeID::WildcardSSS);
+	// return id if replacesOldID is false. else return id | 0xFF00'0000'0000'0000
+	return TypeID(replacesOldID ? (id | 0xFF00'0000'0000'0000) : id, replacesOldID ? 0 : 3);
 }
 
 std::pair<UINT_32, bool> ODF::PoolCollection::makeFullTypeID(size_t fullTypeID)
 {
-	return std::make_pair(static_cast<UINT_32>(fullTypeID) & 0xFFFF'FFFF, fullTypeID & 0xFF00'0000'0000'0000);
+	size_t dbg = fullTypeID & 0xFF00'0000'0000'0000;
+	return std::make_pair(static_cast<UINT_32>(fullTypeID) & 0xFFFF'FFFF, (fullTypeID & 0xFF00'0000'0000'0000) == 0xFF00'0000'0000'0000);
 }
 
 ODF::Pool ODF::PoolCollection::operator=(Pool pool)
@@ -4602,14 +4684,16 @@ void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem) const
 	saveToMemory(mem, runtimeID);
 }
 
-void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem, unsigned char runtimeID) const
+void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem, size_t runtimeID) const
 {
 	std::pair id = PoolCollection::makeFullTypeID(runtimeID);
 	switch (sss)
 	{
 	case 0: // uint8 and is treated as built-in type
 		if (!id.second)
+		{
 			THROW InvalidTypeID();
+		}
 		mem.write<UINT_8>(id.first);
 		break;
 	case 1: // uint8
