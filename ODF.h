@@ -152,7 +152,7 @@ public:
 			static constexpr unsigned char WildcardSSS = 0xFF; // In case the sss isn't needed, it is set to this value, to prevent accidental use.
 			size_t runtimeID; // the id that the TypeID is translated to at runtime
 			unsigned char sss; // size specifier specifier. ReplacesOldID is true if sss == 0
-			TypeID() = default;
+			TypeID();
 			TypeID(size_t runtimeID, unsigned char sss);
 			void saveToMemory(MemoryDataStream& mem) const;
 			void saveToMemory(MemoryDataStream& mem, size_t runtimeID) const;
@@ -163,11 +163,19 @@ public:
 
 			void operator++();
 		};
+		struct TypeIDWithDependencies : public TypeID
+		{
+			std::vector<TypeID> dependencies;
+
+			TypeIDWithDependencies() = default;
+			TypeIDWithDependencies(const TypeID& other);
+			TypeIDWithDependencies& operator=(const TypeID& tid);
+		};
 		struct TypeIDHasher // hashes only the runtimeID
 		{
 			size_t operator()(const TypeID& id) const;
 		};
-		std::unordered_map<Type, TypeID, TypeHasher> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
+		std::unordered_map<Type, TypeIDWithDependencies, TypeHasher> definedTypes; // holds all types that should be defined by the current document and their corresponding type.
 		std::unordered_map<size_t, TypeID> imports; // maps globalID (key) to localID (value)
 		std::unordered_map<size_t, TypeID> exports; // maps localID (key) to globalID (value)
 
@@ -175,8 +183,8 @@ public:
 		void addExport(size_t localID, size_t globalID, unsigned char sss); // throws VTypeDataAlreadyExists if the element (localID) already exists.
 		void addImport(size_t id, unsigned char sss); // throws VTypeDataAlreadyExists if the element already exists
 		void addImport(size_t globalID, size_t localID, unsigned char sss); // throws VTypeDataAlreadyExists if the element (globalID) already exists
-		void addDefinedType(const Type& type, size_t typeID, unsigned char sss); // throws VTypeDataAlreadyExists if the element already exists
-		void addDefinedType(const Type& type, TypeID typeID); // throws VTypeDataAlreadyExists if the element already exists
+		TypeIDWithDependencies& addDefinedType(const Type& type, size_t typeID, unsigned char sss); // throws VTypeDataAlreadyExists if the element already exists
+		TypeIDWithDependencies& addDefinedType(const Type& type, const TypeIDWithDependencies& typeID); // throws VTypeDataAlreadyExists if the element already exists
 
 		TypeID getFreeTypeID() const; // returns the smallest possible unused typeID
 		static unsigned char getNextBIOTypeID(unsigned char type = 0);
@@ -184,11 +192,15 @@ public:
 		bool isAlreadyDefined(const Type& type) const;
 		bool isAlreadyDefined(TypeID typeID) const;
 		std::optional<ODF::VTypeInfo::TypeID> getTypeID(const Type& type) const; // returns nullopt if the type isn't defined
-		bool useType(MemoryDataStream& mem, const Type& type, const ConstParseInfo& parseInfo); // Use the type with USETYPE if it is defined (return true), otherwise save it normally (return false).
+		bool useType(MemoryDataStream& mem, const Type& type, const ConstParseInfo& parseInfo) const; // Use the type with USETYPE if it is defined (return true), otherwise save it normally (return false).
 		void saveDefinedTypes(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const;
 		void saveImports(MemoryDataStream& mem) const;
 		void saveExports(MemoryDataStream& mem) const;
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const;
+
+		operator bool(); // returns true if there is something to be saved
+
+		VTypeInfo() = default;
 	};
 
 	typedef std::unordered_map<VTypeInfo::TypeID, Type, VTypeInfo::TypeIDHasher> PoolType;
@@ -210,7 +222,7 @@ public:
 		void exportType(TypeID id, const Type& type);
 		void exportType(const std::pair<TypeID, const Type&>& pair);
 
-		std::optional<Type> parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo); // working on it
+		std::optional<std::pair<ODF::Type, ODF::VTypeInfo::TypeID>> parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo);
 		static unsigned char getVTypeSizeSpec(unsigned char vtype); // returns the sss (0-3) of a virtual type
 		static VTypeInfo::TypeID getFullTypeID(UINT_8 id, bool replacesOldID);
 		static VTypeInfo::TypeID getFullTypeID(UINT_16 id, bool replacesOldID);
@@ -242,6 +254,7 @@ public:
 		std::shared_ptr<PoolCollection> pools;
 		std::shared_ptr<PoolType> localPool;
 		std::shared_ptr<VTypeInfo> vtypeinfo;
+		std::vector<VTypeInfo::TypeID>* dependecies;
 		ParseInfo(std::shared_ptr<PoolCollection>& pools, std::shared_ptr<PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo);
 		ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo);
 	};
@@ -249,9 +262,14 @@ public:
 	// not exported into the dll
 	struct ConstParseInfo
 	{
+		unsigned char flags;
+		static constexpr unsigned char FLAG_NO_USETYPE = 0b0000'0001; // the USETYPE shortcut will not be used. used during the definition of a type, as it would otherwise just USETYPE itself
+		static constexpr unsigned char FLAG_NO_IMPLICIT_DEFTYPE = 0b0000'0010; // DEFTYPE will not be used. also used in the saving of VTypeInfo to prevent accidetal addition DEFTYPEs.
+
 		std::shared_ptr<const PoolCollection> pools;
 		std::shared_ptr<const PoolType> localPool;
 		std::shared_ptr<const VTypeInfo> vtypeinfo;
+
 		ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo);
 	};
 	// both shared_ptrs are used as optional (nullptr if no value)
@@ -276,16 +294,17 @@ public:
 	public:
 		typedef unsigned char Type;
 		Type type;
-		inline unsigned char byte() const; // returns just the raw byte.
-		inline Type sizeSpec() const;
-		inline bool isSigned() const;
-		inline bool isUnsigned() const;
-		inline bool isMixed() const;
-		inline bool isFixed() const;
-		inline bool isObject() const;
-		inline bool isList() const;
-		inline Type smallType() const;
-		inline Type withoutSSS() const; // without size specifier specifier
+		unsigned char byte() const; // returns just the raw byte.
+		Type sizeSpec() const;
+		bool isSigned() const;
+		bool isUnsigned() const;
+		bool isWidestring();
+		bool isMixed() const;
+		bool isFixed() const;
+		bool isObject() const;
+		bool isList() const;
+		Type smallType() const; // without size specifier specifier and extra bit
+		Type withoutSSS() const; // without size specifier specifier
 		bool isVirtual() const;
 		static bool isVirtual(unsigned char type);
 		static bool isBuiltIn(unsigned char type);
@@ -459,7 +478,7 @@ public:
 		TypeSpecifier operator=(TypeSpecifier type);
 
 		Type();
-		Type(MemoryDataStream& mem, const ParseInfo& parseInfo); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails.
+		Type(MemoryDataStream& mem, const ParseInfo& parseInfo, std::vector<VTypeInfo::TypeID>* dependecies = nullptr); // loads the current object form mem. Throws a ODF::Status if loadFromMemory fails. note that dependencies is an output parameter
 		Type(const Type& other);
 		Type(Type&& type) noexcept;
 		Type(TypeSpecifier type);
@@ -1080,6 +1099,7 @@ public:
 
 	// print operators
 	friend std::ostream& operator<<(std::ostream& out, const ODF& odf);
+	friend std::ostream& operator<<(std::ostream& out, const TypeSpecifier& tspec);
 	friend std::ostream& operator<<(std::ostream& out, const Object& obj);
 	friend std::ostream& operator<<(std::ostream& out, const List& list);
 	friend std::ostream& operator<<(std::ostream& out, const std::wstring& wstr);
@@ -1203,7 +1223,7 @@ public:
 	Status loadFromMemory(MemoryDataStream& mem); // main load function
 	Status loadFromMemory(const char* data, size_t size);
 
-	Status saveToFile(std::string file);
+	Status saveToFile(std::string file) const;
 	Status loadFromFile(std::string file);
 
 	Status saveToStream(std::ostream& out);

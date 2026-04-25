@@ -1,5 +1,6 @@
 #include "ODF.h"
 #include "OdfInline.hpp"
+#include "OdfUtil.hpp"
 
 using namespace oi;
 
@@ -83,9 +84,18 @@ void pse()
 
 	ODF element;
 	const char* dbg = data.get();
-	element.loadFromMemory(data.get(), size);
+	MemoryDataStream mds(data.get(), size);
+	element.loadFromMemory(mds);
 
 	std::cout << element << "\n";
 
 	element.saveToFile("element.odf");
+
+	size_t originalSize = std::filesystem::file_size("old.odf");
+	size_t newSize = std::filesystem::file_size("element.odf");
+	long long dif = newSize - originalSize;
+	if (!dif)
+		std::cout << "files are same size :)";
+	else
+		std::cout << "size mismatch: " << originalSize << " // " << newSize << " (" << (dif < 0 ? '-' : '+') << abs(dif) << ")\n";
 }

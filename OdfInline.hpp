@@ -43,17 +43,41 @@ namespace oi
 	constexpr Byte S3 = 0xC0;
 
 	// helpers
+	constexpr bool IsBuiltInType(Byte type)
+	{
+		const uint8_t high_nibble = type & 0xF0;
+
+		// 1. Exclude the "Special" high-nibble rows 0x0n and 0x2n, which iclude all types
+		if (high_nibble == 0x0 || high_nibble == 0x2) return false;
+
+		// 2. Exclude shadows of the size specified types
+		// If the 2 MSBs are used, the type is defined by the lower 6 bits (b & 0x3F).
+		const uint8_t withoutSSS = type & 0x3F;
+		if (withoutSSS == FXLST || withoutSSS == DEFTYPE || withoutSSS == IMPORT || withoutSSS == EXPORT || withoutSSS == USETYPE || withoutSSS == IMPORTAS || withoutSSS == EXPORTAS)
+			return false;
+
+		return true;
+	}
+
 	template<size_t idx>
-	constexpr Byte BuiltInType()
+	consteval Byte BuiltInType()
 	{
 		// the built in types are distributed to 0xnm
 		// where n is a hexadecimal digit except 0 or 2 and m is a hexadecimal digit without constraints.
-		// That gives (16 - 2) * 16 = 224 combinatiosn
+		// That gives (16 - 2) * 16 - (7 sizespecified type * 3 more types for sss 01, 10 and 11) = 203 combinatiosn
+		static_assert(idx < 203, "Index out of range. Only 203 BuiltInType combinations exist.");
 
-		static_assert(idx < 224);
-		if (idx <= 0xF)
-			return idx | 0x10;
-		return (idx - 0x10) + 0x20;
+		// Compile-time search for the N-th valid byte
+		return []() constexpr -> Byte {
+			std::size_t count = 0;
+			for (int b = 0; b <= 0xFF; ++b) {
+				if (IsBuiltInType(static_cast<Byte>(b))) {
+					if (count == idx) return static_cast<Byte>(b);
+					count++;
+				}
+			}
+			return static_cast<Byte>(0);
+		}();
 	}
 
 	template<typename T>
@@ -61,7 +85,7 @@ namespace oi
 	{
 		std::vector<Byte> data(sizeof(T));
 		memcpy(data.data(), reinterpret_cast<const void*>(&t), sizeof(T));
-		return std::move(data);
+		return data;
 	}
 
 	using OIAny = std::variant<Byte, std::vector<Byte>>;

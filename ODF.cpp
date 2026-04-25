@@ -58,6 +58,13 @@ void ODF::Type::readTypeSpecifier(MemoryDataStream& mem)
 
 ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const
 {
+	// check if the type is registered in the parse Info. and use USETYPE in that case
+	if (!(parseInfo.flags & ConstParseInfo::FLAG_NO_USETYPE)) // skip if FLAG_NO_USETYPE is set
+	{
+		parseInfo.vtypeinfo->useType(mem, *this, parseInfo);
+		return Status::Ok;
+	}
+
 	// specifier priorities:
 	// 1. Type
 	// 2. Size
@@ -134,10 +141,12 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& pa
 		// it is required that lPool points to a valid pool. If no localPool is provided, one will be created. Same for the poolCollection
 		try // parse(...) might throw
 		{
-			std::optional<Type> optType = parseInfo.pools->parse(mem, parseInfo.localPool, parseInfo.vtypeinfo);
+			std::optional<std::pair<ODF::Type, ODF::VTypeInfo::TypeID>> optType = parseInfo.pools->parse(mem, parseInfo.localPool, parseInfo.vtypeinfo);
 			if (optType.has_value())
 			{
-				*this = optType.value();
+				*this = optType.value().first;
+				if (parseInfo.dependecies)
+					parseInfo.dependecies->push_back(optType.value().second);
 				return Status::Ok;
 			}
 		}
@@ -153,22 +162,7 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& pa
 	else
 	{
 		checkImmutable();
-		unsigned char byte = mem.read<unsigned char>();
-		if (TypeSpecifier::isBuiltIn(byte))
-			*this = byte;
-		else
-		{
-			// try importing the type from a pool
-			try
-			{
-				*this = parseInfo.importType(PoolCollection::getFullTypeID(byte, true)).value();
-				return Status::Ok;
-			}
-			catch (std::bad_optional_access&)
-			{
-				return Status::InvalidType;
-			}
-		}
+		*this = mem.read<unsigned char>();
 	}
 	
 	bool obj = type.isObject();
@@ -219,22 +213,27 @@ ODF::Status ODF::Type::loadFromMemory(MemoryDataStream& mem, const ParseInfo& pa
 }
 
 #pragma region TypeSpecifier
-inline unsigned char ODF::TypeSpecifier::byte() const
+unsigned char ODF::TypeSpecifier::byte() const
 {
 	return type;
 }
 
-inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::sizeSpec() const
+ODF::TypeSpecifier::Type ODF::TypeSpecifier::sizeSpec() const
 {
 	return type & 0b11000000;
 }
 
-inline bool ODF::TypeSpecifier::isSigned() const
+bool ODF::TypeSpecifier::isSigned() const
 {
 	return !(type & 0b00100000);
 }
 
-inline bool ODF::TypeSpecifier::isUnsigned() const
+bool ODF::TypeSpecifier::isUnsigned() const
+{
+	return type & 0b00100000;
+}
+
+bool ODF::TypeSpecifier::isWidestring()
 {
 	return type & 0b00100000;
 }
@@ -348,6 +347,39 @@ bool operator!=(const ODF::List& arr1, const ODF::List& arr2)
 std::ostream& operator<<(std::ostream& out, const ODF& odf)
 {
 	return ODF::print(out, odf, ODF::PrettyPrintInfo());
+}
+
+std::ostream& operator<<(std::ostream& out, const ODF::TypeSpecifier& tspec)
+{
+	using TS = ODF::TypeSpecifier;
+	switch (tspec.withoutSSS())
+	{
+	case TS::NULLTYPE: return out << "NULLTYPE";
+	case TS::UNDEFINED: return out << "UNDEFINED";
+	case TS::BYTE: return out << "BYTE";
+	case TS::UBYTE: return out << "UBYTE";
+	case TS::SHORT: return out << "SHORT";
+	case TS::USHORT: return out << "USHORT";
+	case TS::INT: return out << "INT";
+	case TS::UINT: return out << "UINT";
+	case TS::LONG: return out << "LONG";
+	case TS::ULONG: return out << "ULONG";
+	case TS::FLOAT: return out << "FLOAT";
+	case TS::DOUBLE: return out << "DOUBLE";
+	case TS::CSTR: return out << "CSTR";
+	case TS::WSTR: return out << "WSTR";
+	case TS::FXOBJ: return out << "FXOBJ";
+	case TS::MXOBJ: return out << "MXOBJ";
+	case TS::FXLIST: return out << "FXLIST";
+	case TS::MXLIST: return out << "MXLIST";
+	case TS::DEFTYPE: return out << "DEFTYPE";
+	case TS::USETYPE: return out << "USETYPE";
+	case TS::EXPORT: return out << "EXPORT";
+	case TS::EXPORTAS: return out << "EXPORT";
+	case TS::IMPORT: return out << "IMPORT";
+	case TS::IMPORTAS: return out << "IMPORT";
+	default: return out << "TYPE ERROR";
+	}
 }
 
 std::ostream& operator<<(std::ostream& out, const ODF::Object& obj)
@@ -1989,11 +2021,13 @@ ODF::TypeSpecifier ODF::Type::operator=(TypeSpecifier type)
 
 ODF::Type::Type() : complexSpec(nullptr), immutable(false) {}
 
-ODF::Type::Type(MemoryDataStream& mem, const ParseInfo& parseInfo)
+ODF::Type::Type(MemoryDataStream& mem, const ParseInfo& parseInfo, std::vector<VTypeInfo::TypeID>* dependecies)
 {
 	immutable = false;
 	complexSpec = nullptr;
-	Status error = this->loadFromMemory(mem, parseInfo);
+	ParseInfo localParseInfo = parseInfo;
+	localParseInfo.dependecies = dependecies;
+	Status error = this->loadFromMemory(mem, localParseInfo);
 	if (error)
 	{
 		THROW error;
@@ -2221,10 +2255,11 @@ ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 	ConstParseInfo parseInfo(pools, localPool, vtypeinfo);
 
 	// save virtual types that were registered during loading, if the object was loaded in the past
-	if (vtypeinfo)
+	if (*vtypeinfo)
 		vtypeinfo->saveToMemory(mem, parseInfo);
 
-	// save header
+	// save header, reset flags
+	parseInfo.flags = 0;
 	if (Status error = type.saveToMemory(mem, parseInfo))
 		return error;
 	
@@ -2325,33 +2360,33 @@ inline bool ODF::Type::isFixed() const
 	return type.isFixed();
 }
 
-inline bool ODF::TypeSpecifier::isMixed() const
+bool ODF::TypeSpecifier::isMixed() const
 {
 	return type & FLAG_MIXED;
 }
 
-inline bool ODF::TypeSpecifier::isFixed() const
+bool ODF::TypeSpecifier::isFixed() const
 {
 	// if type is list or object and FLAG_MIXED is not set
 	return (type & FLAG_OBJ || type & FLAG_LIST) && !(type & FLAG_MIXED);
 }
 
-inline bool ODF::TypeSpecifier::isObject() const
+bool ODF::TypeSpecifier::isObject() const
 {
 	return smallType() == FLAG_OBJ;
 }
 
-inline bool ODF::TypeSpecifier::isList() const
+bool ODF::TypeSpecifier::isList() const
 {
 	return type & FLAG_LIST;
 }
 
-inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::smallType() const
+ODF::TypeSpecifier::Type ODF::TypeSpecifier::smallType() const
 {
 	return type & 0b0001'1111;
 }
 
-inline ODF::TypeSpecifier::Type ODF::TypeSpecifier::withoutSSS() const
+ODF::TypeSpecifier::Type ODF::TypeSpecifier::withoutSSS() const
 {
 	return type & 0b00'111111;
 }
@@ -2364,12 +2399,23 @@ bool ODF::TypeSpecifier::isVirtual() const
 bool ODF::TypeSpecifier::isVirtual(unsigned char type)
 {
 	type &= 0b0001'1111;
-	return (type == DEFTYPE) || (type == IMPORT) || (type == EXPORT);
+	return (type == DEFTYPE) || (type == IMPORT) || (type == EXPORT) || !isBuiltIn(type);
 }
 
 bool ODF::TypeSpecifier::isBuiltIn(unsigned char type)
 {
-	return (type & 0b0001'1111) <= LAST_SPEC; // this cuts out the sss and extra bit, then compares the resulting value if it is smaller or equal than the last type
+	const uint8_t high_nibble = type >> 4;
+
+	// 1. Exclude the "Special" high-nibble rows 0x0n and 0x2n, which iclude all types
+	if (high_nibble == 0x0 || high_nibble == 0x2) return true;
+
+	// 2. Exclude shadows of the size specified types
+	// If the 2 MSBs are used, the type is defined by the lower 6 bits (b & 0x3F).
+	const uint8_t withoutSSS = type & 0x3F;
+	if (withoutSSS == FXLIST || withoutSSS == DEFTYPE || withoutSSS == IMPORT || withoutSSS == EXPORT || withoutSSS == USETYPE || withoutSSS == IMPORTAS || withoutSSS == EXPORTAS)
+		return true;
+
+	return false;
 }
 
 void ODF::TypeSpecifier::saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const
@@ -2403,9 +2449,9 @@ ODF::Status ODF::loadFromMemory(const char* data, size_t size)
 	return loadFromMemory(mem);
 }
 
-ODF::Status ODF::saveToFile(std::string file)
+ODF::Status ODF::saveToFile(std::string file) const
 {
-	MemoryDataStream mem;
+	MemoryDataStream mem(0ui64); // DBG; TODO. (remove constructor argument to enable dynamic allocation for release build)
 	saveToMemory(mem);
 	
 	std::ofstream out(file, std::ios::binary);
@@ -4371,7 +4417,6 @@ std::optional<ODF::Type> ODF::PoolCollection::importType(size_t id) const
 
 std::optional<ODF::Type> ODF::PoolCollection::importType(TypeID id) const
 {
-	// search the local pool as it is always preferred
 	// search all pools for this type and return it.
 	for (const Pool& it : importPools)
 	{
@@ -4397,7 +4442,7 @@ void ODF::PoolCollection::exportType(const std::pair<TypeID, const Type&>& pair)
 		it->insert(pair);
 }
 
-std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
+std::optional<std::pair<ODF::Type, ODF::VTypeInfo::TypeID>> ODF::PoolCollection::parse(MemoryDataStream& mem, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
 {
 	using TypeID = VTypeInfo::TypeID;
 	using TS = TypeSpecifier;
@@ -4411,7 +4456,7 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 
 	// declare variables for switch statement
 	Type type;
-	TypeID key;
+	VTypeInfo::TypeIDWithDependencies key;
 
 	// little note on memory mangement:
 	// The PoolCollection inherits from std::enable_shared_from_this to get access to itself in a shared_ptr.
@@ -4431,19 +4476,19 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 			// This type is than saved in the localPool and added as a key into defiendTypes which points to the typeID, which is used as key by the localPool.
 		case 0:
 			key = getFullTypeID(mem.read<UINT_8>(), true);
-			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo, &key.dependencies), key);
 			return std::nullopt;
 		case 1:
 			key = getFullTypeID(mem.read<UINT_8>(), false);
-			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo, &key.dependencies), key);
 			return std::nullopt;
 		case 2:
 			key = getFullTypeID(mem.read<UINT_16>(), false);
-			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo, &key.dependencies), key);
 			return std::nullopt;
 		case 3:
 			key = getFullTypeID(mem.read<UINT_32>(), false);
-			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo), key);
+			vtypeinfo->addDefinedType((*localPool)[key] = Type(mem, parseInfo, &key.dependencies), key);
 			return std::nullopt;
 		}
 		break;
@@ -4451,17 +4496,23 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 	case TS::USETYPE:
 		try
 		{
+			TypeID tid;
 			switch (getVTypeSizeSpec(vtype))
 			{
 			case 0:
-				return localPool->at(getFullTypeID(mem.read<UINT_8>(), true));
+				tid = getFullTypeID(mem.read<UINT_8>(), true);
+				break;
 			case 1:
-				return localPool->at(getFullTypeID(mem.read<UINT_8>(), false));
+				tid = getFullTypeID(mem.read<UINT_8>(), false);
+				break;
 			case 2:
-				return localPool->at(getFullTypeID(mem.read<UINT_16>(), false));
+				tid = getFullTypeID(mem.read<UINT_16>(), false);
+				break;
 			case 3:
-				return localPool->at(getFullTypeID(mem.read<UINT_32>(), false));
+				tid = getFullTypeID(mem.read<UINT_32>(), false);
+				break;
 			}
+			return std::make_pair(localPool->at(tid), tid);
 		}
 		catch (std::out_of_range&)
 		{
@@ -4611,7 +4662,8 @@ std::optional<ODF::Type> ODF::PoolCollection::parse(MemoryDataStream& mem, const
 		}
 		break;
 	default:
-		return std::nullopt;
+		TypeID tid = getFullTypeID(vtype, true);
+		return std::make_pair(parseInfo.importType(tid).value(), tid);
 	}
 	THROW InvalidCondition("InvalidCondition: End of Function 'ODF::PoolCollection::parse(MemoryDataStream&, PoolType&)' reached.");
 }
@@ -4677,6 +4729,8 @@ ODF::Pool ODF::PoolCollection::makePool()
 
 ODF::UnresolvedImport::UnresolvedImport(const std::string& message) : runtime_error(message) {}
 
+ODF::VTypeInfo::TypeID::TypeID() : runtimeID(0), sss(0) {}
+
 ODF::VTypeInfo::TypeID::TypeID(size_t runtimeID, unsigned char sss) : runtimeID(runtimeID), sss(sss) {}
 
 void ODF::VTypeInfo::TypeID::saveToMemory(MemoryDataStream& mem) const
@@ -4716,12 +4770,12 @@ unsigned char ODF::VTypeInfo::TypeID::addSSS(unsigned char typeSpec) const
 unsigned char ODF::VTypeInfo::TypeID::smallestSSS(size_t type)
 {
 	if (type <= UINT8_MAX)
-		return 0;
-	if (type <= UINT16_MAX)
 		return 1;
-	if (type <= UINT32_MAX)
+	if (type <= UINT16_MAX)
 		return 2;
-	return 3;
+	if (type <= UINT32_MAX)
+		return 3;
+	THROW InvalidTypeID("type id too large for calculating secondary size specifier");
 }
 
 void ODF::VTypeInfo::TypeID::matchSSS()
@@ -4779,52 +4833,61 @@ void ODF::VTypeInfo::addImport(size_t globalID, size_t localID, unsigned char ss
 	imports[globalID] = TypeID(localID, sss);
 }
 
-void ODF::VTypeInfo::addDefinedType(const Type& type, size_t typeID, unsigned char sss)
+ODF::VTypeInfo::TypeIDWithDependencies& ODF::VTypeInfo::addDefinedType(const Type& type, size_t typeID, unsigned char sss)
 {
 	if (definedTypes.contains(type))
 	{
 		THROW VTypeDataAlreadyExists();
 	}
-	definedTypes[type] = TypeID(typeID, sss);
+	return definedTypes[type] = TypeID(typeID, sss);
 }
 
-void ODF::VTypeInfo::addDefinedType(const Type& type, TypeID typeID)
+ODF::VTypeInfo::TypeIDWithDependencies& ODF::VTypeInfo::addDefinedType(const Type& type, const TypeIDWithDependencies& typeID)
 {
 	if (definedTypes.contains(type))
 	{
 		THROW VTypeDataAlreadyExists();
 	}
-	definedTypes[type] = typeID;
+	return definedTypes[type] = typeID;
 }
 
 ODF::VTypeInfo::TypeID ODF::VTypeInfo::getFreeTypeID() const
 {
-	// first search through ids that replace built-in ones, as they are the most efficient.
-
-	int possibleSolutions = (31 - TypeSpecifier::LAST_SPEC) * 8;
-	size_t tries = 0;
-	unsigned char bio = 0;
-	while (true)
-	{
-		bio = getNextBIOTypeID();
-		tries++;
-		if (tries > possibleSolutions)
-			break;
-		if (!isAlreadyDefined(PoolCollection::getFullTypeID(bio, true)))
-			return PoolCollection::getFullTypeID(bio, true);
-	}
-
-	// search for full typeID
-	TypeID id(1, 0); // start with 1, so the loop can terminate when tries reaches UINT64_MAX, just before it overflows.
-	tries = 0;
-	while (true)
-	{
+	unsigned int i = 0;
+	do {
+		TypeID id(i, TypeID::smallestSSS(i));
 		if (!isAlreadyDefined(id))
 			return id;
-		tries++;
-		if (tries == UINT64_MAX)
-			break;
-	}
+		i++;
+	} while (i != UINT32_MAX);
+
+	/// TODO
+	//// first search through ids that replace built-in ones, as they are the most efficient.
+
+	//int possibleSolutions = (31 - TypeSpecifier::LAST_SPEC) * 8;
+	//size_t tries = 0;
+	//unsigned char bio = 0;
+	//while (true)
+	//{
+	//	bio = getNextBIOTypeID();
+	//	tries++;
+	//	if (tries > possibleSolutions)
+	//		break;
+	//	if (!isAlreadyDefined(PoolCollection::getFullTypeID(bio, true)))
+	//		return PoolCollection::getFullTypeID(bio, true);
+	//}
+
+	//// search for full typeID
+	//size_t id = 1; // start with 1, so the loop can terminate when tries reaches UINT64_MAX, just before it overflows.
+	//tries = 0;
+	//while (true)
+	//{
+	//	TypeID id(id, TypeID::smallestSSS(id));
+	//	if (!isAlreadyDefined(id))
+	//		return id;
+	//	if (tries == UINT64_MAX)
+	//		break;
+	//}
 
 	// no id was found
 	THROW InvalidTypeID("InvalidTypeID: ODF::VTypeInfo::getFreeID() couldn't find any free typeID. This is bug if you didn't use 9.223.372.036.854.775.807*2+1 ids");
@@ -4863,7 +4926,7 @@ std::optional<ODF::VTypeInfo::TypeID> ODF::VTypeInfo::getTypeID(const Type& type
 	}
 }
 
-bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const ConstParseInfo& parseInfo)
+bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const ConstParseInfo& parseInfo) const
 {
 	try
 	{
@@ -4874,33 +4937,85 @@ bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const Cons
 	}
 	catch (std::out_of_range&)
 	{
-		// in case the type isn't already defined, it will be defined.
-		
-		// create a TypeID
-		TypeID newID = getFreeTypeID();
+		// in case the type isn't already defined, it will be defined if noDefType is false		
+		if (parseInfo.flags & ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE)
+		{
+			type.saveToMemory(mem, parseInfo); // save type
+		}
+		else
+		{
+			// create a TypeIDTypeID newID;
+			TypeID newID = getFreeTypeID();
 
-		// register Type
-		addDefinedType(type, newID);
-		
-		// define the type in the file
-		mem.write(newID.addSSS(TypeSpecifier::DEFTYPE));
-		newID.saveToMemory(mem); // save id
-		type.saveToMemory(mem, parseInfo); // save type
+			// register Type
+			const_cast<VTypeInfo*>(this)->addDefinedType(type, newID); // sus because const cast. Change this maybe?
 
-		// add USETYPE so it is available as if nothing happened
-		mem.write(newID.addSSS(TypeSpecifier::USETYPE));
-		newID.saveToMemory(mem);
+			// define the type in the file
+			mem.write(newID.addSSS(TypeSpecifier::DEFTYPE));
+			newID.saveToMemory(mem); // save id
+			type.saveToMemory(mem, parseInfo); // save type
+
+			// add USETYPE so it is available as if nothing happened
+			mem.write(newID.addSSS(TypeSpecifier::USETYPE));
+			newID.saveToMemory(mem);
+		}
+		
 		return false;
 	}
 }
 
 void ODF::VTypeInfo::saveDefinedTypes(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const
 {
-	for (const std::pair<Type, TypeID>& it : definedTypes)
+	ConstParseInfo localParseInfo = parseInfo; // do no edit the passed parseInfo
+	localParseInfo.flags |= ConstParseInfo::FLAG_NO_USETYPE; // as all existing types are defined here, USETYPE isn't allowed
+	//localParseInfo.flags |= ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE;
+
+	// a little explanation for the following algorithm:
+	// alreadySaved cotains all types that already have been saved.
+	// THen the the function will iterate over the types that needs to be saved. If the dependencies are met, the type will be saved, otherwise it will be skipped.
+	// Because the iteration for loop is in a loop itself, eventually the programm will encounter it again after the dependencies are saved, and save it.
+	// If a circular dependency occurs, eventually the loop will come to a state, where it won't save anything because both types are waiting for each other.
+	// This will be detected by check if in one iteration of the for-loop nothing was saved. If this is true, the function will crash.
+
+	std::vector<const TypeID*> alreadySaved;
+	alreadySaved.reserve(definedTypes.size());
+
+	std::vector<const std::pair<const Type, TypeIDWithDependencies>*> leftToSave;
+	leftToSave.reserve(definedTypes.size());
+	for (const auto& it : definedTypes)
+		leftToSave.push_back(&it);
+
+	while (alreadySaved.size() != definedTypes.size())
 	{
-		mem.write(it.second.addSSS(TypeSpecifier::DEFTYPE));
-		it.second.saveToMemory(mem);
-		it.first.saveToMemory(mem, parseInfo);
+		bool nothingSaved = true; // for detecting circular dependencies
+		for (const std::pair<const Type, TypeIDWithDependencies>* it : leftToSave)
+		{
+			// skip if already saved
+			if (!it)
+				continue;
+
+			// check dependencies
+			for (const TypeID& typeIt : it->second.dependencies)
+				if (std::ranges::find(alreadySaved, typeIt, [](const TypeID* tid) {return *tid; }) == alreadySaved.end()) // a dependency wasn't found
+					goto skip_iteration; // break or continue wouldn't work because of the inner for loop
+
+			// save
+			mem.write(it->second.addSSS(TypeSpecifier::DEFTYPE));
+			it->second.saveToMemory(mem);
+			it->first.saveToMemory(mem, localParseInfo);
+			nothingSaved = false;
+
+			// make it avaiable as dependency
+			alreadySaved.push_back(reinterpret_cast<const TypeID*>(&it->second));
+
+			// remove from leftToSave
+
+			// DEBUG:
+			// THe error is in the line above. on the first iteration it should FXOBJ<CSTR> (07 06) but it somehow saves FXOBJ<DEFTYPE_1> (07 49)
+
+		skip_iteration:
+			; // syntax error "}" without this
+		}
 	}
 }
 
@@ -4948,6 +5063,11 @@ void ODF::VTypeInfo::saveToMemory(MemoryDataStream& mem, const ConstParseInfo& p
 	saveExports(mem);
 }
 
+ODF::VTypeInfo::operator bool()
+{
+	return definedTypes.size() || imports.size() || exports.size();
+}
+
 std::optional<ODF::Type> ODF::ParseInfo::importType(size_t id) const
 {
 	return importType(PoolCollection::TypeID(id, 0));
@@ -4980,14 +5100,14 @@ std::shared_ptr<ODF::PoolCollection>& ODF::ParseInfo::guaranteePoolCollection()
 	return pools;
 }
 
-ODF::ParseInfo::ParseInfo(std::shared_ptr<PoolCollection>& pools, std::shared_ptr<PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo)
+ODF::ParseInfo::ParseInfo(std::shared_ptr<PoolCollection>& pools, std::shared_ptr<PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo) : dependecies(nullptr)
 {
 	this->pools = pools ? pools : pools = std::make_shared<PoolCollection>(); // assigns to pools if pools holds a value, otherwise points both pools pointer to a new PoolCollection
 	this->localPool = localPool ? localPool : localPool = std::make_shared<PoolType>();
 	this->vtypeinfo = vtypeinfo ? vtypeinfo : vtypeinfo = std::make_shared<VTypeInfo>();
 }
 
-ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo)
+ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const std::shared_ptr<PoolType>& localPool, const std::shared_ptr<VTypeInfo>& vtypeinfo) : dependecies(nullptr)
 {
 	if (!pools)
 	{
@@ -5006,7 +5126,7 @@ ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const st
 	this->vtypeinfo = vtypeinfo;
 }
 
-ODF::ConstParseInfo::ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo) {}
+ODF::ConstParseInfo::ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo), flags(0) {}
 
 ODF::InvalidParseInformation::InvalidParseInformation(const std::string& message) : runtime_error(message) {}
 
@@ -5058,4 +5178,17 @@ void ODF::PrettyPrintInfo::post(std::ostream& out)
 
 ODF::PrettyPrintInfo::PrettyPrintInfo() : indent(0)
 {
+}
+
+ODF::VTypeInfo::TypeIDWithDependencies::TypeIDWithDependencies(const TypeID& other)
+{
+	runtimeID = other.runtimeID;
+	sss = other.sss;
+}
+
+ODF::VTypeInfo::TypeIDWithDependencies& ODF::VTypeInfo::TypeIDWithDependencies::operator=(const TypeID& tid)
+{
+	runtimeID = tid.runtimeID;
+	sss = tid.sss;
+	return *this;
 }

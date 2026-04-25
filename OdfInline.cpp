@@ -1,4 +1,5 @@
 #include "OdfInline.hpp"
+#include <iostream>
 
 std::tuple<std::shared_ptr<char[]>, size_t> oi::CreateRawData(const RawODF& rodf)
 {
@@ -30,5 +31,5 @@ std::vector<oi::Byte> oi::operator""strODF(const char* str, size_t len)
 {
 	std::vector<Byte> data(len + 1);
 	memcpy(data.data(), str, len + 1);
-	return std::move(data);
+	return data;
 }

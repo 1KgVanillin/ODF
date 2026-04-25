@@ -104,6 +104,16 @@ void MemoryDataStream::deallocateDataOnDestruction(bool deallocate)
 	deallocateOnDestruction = deallocate;
 }
 
+void MemoryDataStream::enableStringObfuscation(bool obfuscation)
+{
+	obfuscated = obfuscation;
+}
+
+void MemoryDataStream::disableStringObfuscation()
+{
+	obfuscated = false;
+}
+
 void MemoryDataStream::enableDynamicAllocation()
 {
 	if (dynamicAllocation)
@@ -140,6 +150,17 @@ void MemoryDataStream::deallocate()
 		selfAllocated = false;
 		start = current = nullptr;
 	}	
+}
+
+MemoryDataStream& MemoryDataStream::reset()
+{
+	setCursor(0);
+	return *this;
+}
+
+void MemoryDataStream::setCursor(size_t index)
+{
+	current = start + index;
 }
 
 MemoryDataStream MemoryDataStream::move()
@@ -285,7 +306,7 @@ void MemoryDataStream::DynamicAllocationMetadata::write(const char* data, size_t
 {
 	vecdata.reserve(vecdata.size() + size);
 	for (size_t i = 0; i < size; i++)
-		vecdata.push_back(data[i]);
+		vecdata.emplace_back(data[i]);
 }
 
 void MemoryDataStream::DynamicAllocationMetadata::read(size_t startindex, char* dest, size_t size)
@@ -431,6 +452,11 @@ void MemoryDataStream::setPrevious(char byte)
 		THROW std::out_of_range("Out of range exception in MemoryDataStream::setPrevious() : no provious byte available");
 	}
 	*(current - 1) = byte;
+}
+
+bool MemoryDataStream::empty() const
+{
+	return !size();
 }
 
 MemoryDataStream::MemoryDataStream(size_t size)

@@ -28,7 +28,7 @@ class DF_API MemoryDataStream
 	};
 
 	char* start;
-	char* current;
+	char* current; // note that current stays 0 durind dynamic allocation mode, because keeping track of the data is managed by the intern std::vector
 	char* firstInvalidAddress;
 	bool rangeDefined; // is current and firstInvalidAddress defined with a valid range?
 	bool insecure; // skip access violation checks
@@ -43,7 +43,7 @@ class DF_API MemoryDataStream
 	bool obfuscated;
 	// bool dynamicAllocation; // this is represented by a nullptr or valid address in dynamicAllocationMeta*
 	DynamicAllocationMetadata* dynamicAllocation;
-	void migrateData(); // convert exitsing object into write only, but with dynamic allocation enabled.
+	void migrateData(); // convert exitsing object into write only, but with dynamic allocation enabled. TODO
 
 	static void makeUnreadable(std::string& str);
 	static void makeReadable(std::string& str);
@@ -79,6 +79,8 @@ public:
 	void enableDynamicAllocation(); // cannot be disabled, stream can be used as before. Uses a std::vector internally. Performance heavy enabled when data is already present, as it is migrated to a std::vector
 	void allocate(size_t size);
 	void deallocate(); // explicitely deallocate data. Called in Destructor
+	MemoryDataStream& reset(); // resets reading / writing position. returns this
+	void setCursor(size_t index);
 	MemoryDataStream move(); // the current stream looses all its rights to the data and transfers it to a new one and returns it.
 	void move(MemoryDataStream& mem); // just like the other move.
 	void finish(); // basically the destructor. Call if the Stream is no longer needed. Handles memory deallocation. Object becomes invalid after a call to this function
@@ -120,6 +122,7 @@ public:
 	}
 	char peekPrevious() const;
 	void setPrevious(char byte);
+	bool empty() const;
 
 	MemoryDataStream(size_t size = 0); // allocates own data, if 0 specified, dynamic allocation on write() calls.
 	MemoryDataStream(char* data);

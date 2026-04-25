@@ -133,6 +133,7 @@
     <ClCompile Include="MemoryDataStream.cpp" />
     <ClCompile Include="ODF.cpp" />
     <ClCompile Include="OdfInline.cpp" />
+    <ClCompile Include="OdfUtil.cpp" />
     <ClCompile Include="pse.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -140,6 +141,7 @@
     <ClInclude Include="GenericDebug.h" />
     <ClInclude Include="MemoryDataStream.h" />
     <ClInclude Include="OdfInline.hpp" />
+    <ClInclude Include="OdfUtil.hpp" />
     <ClInclude Include="OODErrorCodes.h" />
     <ClInclude Include="ODF.h" />
   </ItemGroup>
