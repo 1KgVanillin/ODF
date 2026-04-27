@@ -91,14 +91,20 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem, const ConstParseInfo&
 		ArraySpecifier& listSpec = std::get<ArraySpecifier>(*complexSpec);
 		if (fixed)
 		{
+			ConstParseInfo localParseInfo = parseInfo;
+			localParseInfo.flags &= ~ConstParseInfo::FLAG_NO_USETYPE; // allow usetypes, as the current type can no longer try to use itself and the current type can use USETYPEs for subtypes for memory efficiency.
+			localParseInfo.flags |= ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE; // don't allow deftypes, as the program is currently in a specifier which shouldn't be interrupted by for example DEFTYPEs
 			FixedArraySpecifier& flistSpec = std::get<FixedArraySpecifier>(listSpec);
-			flistSpec.saveToMemory(mem, parseInfo);
+			flistSpec.saveToMemory(mem, localParseInfo);
 			return Status::Ok;
 		}
 		else if (mixed)
 		{
+			ConstParseInfo localParseInfo = parseInfo;
+			localParseInfo.flags &= ~ConstParseInfo::FLAG_NO_USETYPE; // allow usetypes, as the current type can no longer try to use itself and the current type can use USETYPEs for subtypes for memory efficiency.
+			localParseInfo.flags |= ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE; // don't allow deftypes, as the program is currently in a specifier which shouldn't be interrupted by for example DEFTYPEs
 			MixedArraySpecifier& mlistSpec = std::get<MixedArraySpecifier>(listSpec);
-			mlistSpec.saveToMemory(mem, parseInfo);
+			mlistSpec.saveToMemory(mem, localParseInfo);
 			return Status::Ok;
 		}
 	}
@@ -107,14 +113,20 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem, const ConstParseInfo&
 		ObjectSpecifier& objSpec = std::get<ObjectSpecifier>(*complexSpec);
 		if (fixed)
 		{
+			ConstParseInfo localParseInfo = parseInfo;
+			localParseInfo.flags &= ~ConstParseInfo::FLAG_NO_USETYPE; // allow usetypes, as the current type can no longer try to use itself and the current type can use USETYPEs for subtypes for memory efficiency.
+			localParseInfo.flags |= ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE; // don't allow deftypes, as the program is currently in a specifier which shouldn't be interrupted by for example DEFTYPEs
 			FixedObjectSpecifier& fobjSpec = std::get<FixedObjectSpecifier>(objSpec);
-			fobjSpec.saveToMemory(mem, parseInfo);
+			fobjSpec.saveToMemory(mem, localParseInfo);
 			return Status::Ok;
 		}
 		else if (mixed)
 		{
+			ConstParseInfo localParseInfo = parseInfo;
+			localParseInfo.flags &= ~ConstParseInfo::FLAG_NO_USETYPE; // allow usetypes, as the current type can no longer try to use itself and the current type can use USETYPEs for subtypes for memory efficiency.
+			localParseInfo.flags |= ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE; // don't allow deftypes, as the program is currently in a specifier which shouldn't be interrupted by for example DEFTYPEs
 			MixedObjectSpecifier& mobjSpec = std::get<MixedObjectSpecifier>(objSpec);
-			mobjSpec.saveToMemory(mem, parseInfo);
+			mobjSpec.saveToMemory(mem, localParseInfo);
 			return Status::Ok;
 		}
 	}
@@ -4783,6 +4795,11 @@ void ODF::VTypeInfo::TypeID::matchSSS()
 	sss = smallestSSS(runtimeID);
 }
 
+bool ODF::VTypeInfo::TypeID::expandsBuiltIn() const
+{
+	return (runtimeID & 0xFF00'0000'0000'0000) == 0xFF00'0000'0000'0000;
+}
+
 bool ODF::VTypeInfo::TypeID::operator==(const TypeID& other) const
 {
 	return (sss == other.sss || sss == WildcardSSS || other.sss == WildcardSSS)  && runtimeID == other.runtimeID;
@@ -4930,9 +4947,10 @@ bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const Cons
 {
 	try
 	{
-		TypeID id = definedTypes.at(type); // try to access the id before writing anything to the stream to prevent writing of USETYPE in case of exception
-		mem.write(id.addSSS(TypeSpecifier::USETYPE));
-		id.saveToMemory(mem);
+		const TypeID* id = reinterpret_cast<const TypeID*>(&parseInfo.vtypeinfo->definedTypes.at(type)); // try to access the id before writing anything to the stream to prevent writing of USETYPE in case of exception. Use reinterpret_cast and poitner to prevent slicing
+		if (!id->expandsBuiltIn())
+			mem.write(id->addSSS(TypeSpecifier::USETYPE));
+		id->saveToMemory(mem);
 		return true;
 	}
 	catch (std::out_of_range&)
@@ -4940,7 +4958,9 @@ bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const Cons
 		// in case the type isn't already defined, it will be defined if noDefType is false		
 		if (parseInfo.flags & ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE)
 		{
-			type.saveToMemory(mem, parseInfo); // save type
+			ConstParseInfo localParseInfo = parseInfo;
+			localParseInfo.flags |= ConstParseInfo::FLAG_NO_USETYPE; // avoid calling the current function again from saveToMemory, as this would lead to a StackOverflow exception.
+			type.saveToMemory(mem, localParseInfo); // save type
 		}
 		else
 		{
@@ -4948,7 +4968,7 @@ bool ODF::VTypeInfo::useType(MemoryDataStream& mem, const Type& type, const Cons
 			TypeID newID = getFreeTypeID();
 
 			// register Type
-			const_cast<VTypeInfo*>(this)->addDefinedType(type, newID); // sus because const cast. Change this maybe?
+			const_cast<VTypeInfo*>(this)->addDefinedType(type, newID); // sus because const cast. Change this maybe? TODO change this to mutable
 
 			// define the type in the file
 			mem.write(newID.addSSS(TypeSpecifier::DEFTYPE));
@@ -4988,7 +5008,7 @@ void ODF::VTypeInfo::saveDefinedTypes(MemoryDataStream& mem, const ConstParseInf
 	while (alreadySaved.size() != definedTypes.size())
 	{
 		bool nothingSaved = true; // for detecting circular dependencies
-		for (const std::pair<const Type, TypeIDWithDependencies>* it : leftToSave)
+		for (const std::pair<const Type, TypeIDWithDependencies>*& it : leftToSave)
 		{
 			// skip if already saved
 			if (!it)
@@ -5009,9 +5029,7 @@ void ODF::VTypeInfo::saveDefinedTypes(MemoryDataStream& mem, const ConstParseInf
 			alreadySaved.push_back(reinterpret_cast<const TypeID*>(&it->second));
 
 			// remove from leftToSave
-
-			// DEBUG:
-			// THe error is in the line above. on the first iteration it should FXOBJ<CSTR> (07 06) but it somehow saves FXOBJ<DEFTYPE_1> (07 49)
+			it = nullptr;
 
 		skip_iteration:
 			; // syntax error "}" without this
@@ -5147,8 +5165,7 @@ size_t hash_combine(size_t lhs, size_t rhs) {
 size_t ODF::TypeHasher::operator()(const Type& type) const
 {
 	// properties that needs to be hashed are complexSpec, immutable and type
-	// it is sufficient to only hash the pointer complexSpec, isntead of the pointee, as a same pointer value will result in the same pointee value.
-	size_t complexSpecHash = std::hash<ODF::Type::ComplexSpecifier*>{}(type.complexSpec);
+	size_t complexSpecHash = type.complexSpec ? ComplexSpecifierHasher{}(*type.complexSpec) : 0;
 	size_t immutableHash = std::hash<bool>{}(type.immutable);
 	size_t typeHash = std::hash<unsigned char>{}(type.type);
 	return hash_combine(complexSpecHash, hash_combine(immutableHash, typeHash));
@@ -5191,4 +5208,66 @@ ODF::VTypeInfo::TypeIDWithDependencies& ODF::VTypeInfo::TypeIDWithDependencies::
 	runtimeID = tid.runtimeID;
 	sss = tid.sss;
 	return *this;
+}
+
+size_t ODF::ComplexSpecifierHasher::operator()(const Type::ComplexSpecifier& cs)
+{
+	size_t hash = std::hash<size_t>{}(cs.index());
+	if (auto ptr = std::get_if<ObjectSpecifier>(&cs))
+		return hash_combine(hash, ObjectSpecifierHasher{}(*ptr));
+	else
+		return hash_combine(hash, ArraySpecifierHasher{}(std::get<ArraySpecifier>(cs)));
+}
+
+size_t ODF::FixedArraySpecifierHasher::operator()(const FixedArraySpecifier& farrSpec)
+{
+	return hash_combine(std::hash<size_t>{}(farrSpec.size.actualSize), TypeHasher{}(farrSpec.fixType));
+}
+
+size_t ODF::MixedArraySpecifierHasher::operator()(const MixedArraySpecifier& marrSpec)
+{
+	if (marrSpec.types.empty())
+		return 0;
+	size_t hash = TypeHasher{}(marrSpec.types[0]);
+	for (size_t i = 1; i < marrSpec.types.size(); i++)
+		hash = hash_combine(hash, TypeHasher{}(marrSpec.types[i]));
+	return hash;
+}
+
+size_t ODF::FixedObjectSpecifierHasher::operator()(const FixedObjectSpecifier& fobjSpec)
+{
+	size_t hash = TypeHasher{}(fobjSpec.fixType);
+	for (const std::string& key : fobjSpec.keys)
+		hash = hash_combine(hash, std::hash<std::string>{}(key));
+	return hash;
+}
+
+size_t ODF::MixedObjectSpecifierHasher::operator()(const MixedObjectSpecifier& mobjSpec)
+{
+	// combine all keys and all type hashes by XOR and the hash_combine them, to the order of the properties doesn't matter
+	size_t keyHash = 0, typeHash = 0;
+	for (const auto& it : mobjSpec.properties)
+	{
+		keyHash ^= std::hash<std::string>{}(it.first);
+		typeHash ^= TypeHasher{}(it.second);
+	}
+	return hash_combine(keyHash, typeHash);
+}
+
+size_t ODF::ObjectSpecifierHasher::operator()(const ObjectSpecifier& objSpec)
+{
+	size_t hash = std::hash<size_t>{}(objSpec.index());
+	if (auto ptr = std::get_if<MixedObjectSpecifier>(&objSpec))
+		return hash_combine(hash, MixedObjectSpecifierHasher{}(*ptr));
+	else
+		return hash_combine(hash, FixedObjectSpecifierHasher{}(std::get<FixedObjectSpecifier>(objSpec)));
+}
+
+size_t ODF::ArraySpecifierHasher::operator()(const ArraySpecifier& arrSpec)
+{
+	size_t hash = std::hash<size_t>{}(arrSpec.index());
+	if (auto ptr = std::get_if<MixedArraySpecifier>(&arrSpec))
+		return hash_combine(hash, MixedArraySpecifierHasher{}(*ptr));
+	else
+		return hash_combine(hash, FixedArraySpecifierHasher{}(std::get<FixedArraySpecifier>(arrSpec)));
 }

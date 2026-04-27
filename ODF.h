@@ -159,6 +159,7 @@ public:
 			unsigned char addSSS(unsigned char typeSpec) const;
 			static unsigned char smallestSSS(size_t type);
 			void matchSSS(); // selects the smallest possible sss that fits the runtimeID
+			bool expandsBuiltIn() const; // wether the id expands the built-in types (usetype can be skipped)
 			bool operator== (const TypeID& other) const; // as this function might be used in a hashmap, it will return true if runtimeID and sss are equal, or if runtimeIDs are equal and at least one sss is Wildcard.
 
 			void operator++();
@@ -486,6 +487,7 @@ public:
 
 		static Type findBestType(TypeClass tc, unsigned char size, bool unsign = false); // only valid for primitive types. unsign is ignored if no integer type
 	};
+
 	// The ArraySpecifier holds all type information that is needed to load or save an array.
 	// saves or loads the size specifier on save
 	struct DF_API FixedArraySpecifier : public AbstractDataObject
@@ -496,12 +498,22 @@ public:
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
 
+	struct DF_API FixedArraySpecifierHasher
+	{
+		size_t operator()(const FixedArraySpecifier& farrSpec);
+	};
+
 	struct DF_API MixedArraySpecifier : public AbstractDataObject
 	{
 		std::vector<Type> types;
 
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
+	};
+
+	struct DF_API MixedArraySpecifierHasher
+	{
+		size_t operator()(const MixedArraySpecifier& marrSpec);
 	};
 
 	struct DF_API FixedObjectSpecifier : public AbstractDataObject
@@ -512,6 +524,11 @@ public:
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
 
+	struct DF_API FixedObjectSpecifierHasher
+	{
+		size_t operator()(const FixedObjectSpecifier& fobjSpec);
+	};
+
 	struct DF_API MixedObjectSpecifier : public AbstractDataObject
 	{
 		typedef const std::pair<std::string, Type>& ObjectIterator;
@@ -519,6 +536,26 @@ public:
 		std::vector<std::string> iterationOrder;
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
+	};
+
+	struct DF_API MixedObjectSpecifierHasher
+	{
+		size_t operator()(const MixedObjectSpecifier& mobjSpec);
+	};
+
+	struct DF_API ObjectSpecifierHasher
+	{
+		size_t operator()(const ObjectSpecifier& objSpec);
+	};
+
+	struct DF_API ArraySpecifierHasher
+	{
+		size_t operator()(const ArraySpecifier& arrSpec);
+	};
+
+	struct DF_API ComplexSpecifierHasher
+	{
+		size_t operator()(const Type::ComplexSpecifier& cs);
 	};
 
 	// Complex data object functions
