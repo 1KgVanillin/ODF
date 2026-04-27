@@ -150,6 +150,10 @@
       <SubType>
       </SubType>
     </None>
+    <None Include="Format.md">
+      <SubType>
+      </SubType>
+    </None>
     <None Include="MemoryDataStream.md">
       <SubType>
       </SubType>

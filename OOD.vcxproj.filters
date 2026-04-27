@@ -65,5 +65,6 @@
     </None>
     <None Include="MemoryDataStream.md" />
     <None Include="usage.md" />
+    <None Include="Format.md" />
   </ItemGroup>
 </Project>
