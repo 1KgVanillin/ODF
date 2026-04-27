@@ -155,6 +155,10 @@
       </SubType>
     </None>
     <None Include="ODF.tpp" />
+    <None Include="usage.md">
+      <SubType>
+      </SubType>
+    </None>
     <None Include="v2.md">
       <SubType>
       </SubType>

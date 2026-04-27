@@ -64,5 +64,6 @@
       <Filter>Quelldateien</Filter>
     </None>
     <None Include="MemoryDataStream.md" />
+    <None Include="usage.md" />
   </ItemGroup>
 </Project>

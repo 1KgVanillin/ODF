@@ -7,8 +7,6 @@ bool ODF::printType = true;
 std::mutex ODF::printMutex;
 #endif
 unsigned char ODF::Config::DefaultIntegerMergeSize = 0;
-ODF::ComplexExplicitor::OBJSTRUCT ODF::__MOBJ{};
-ODF::ComplexExplicitor::FOBJSTRUCT ODF::__FOBJ{};
 
 // little istream helper
 std::vector<char> read_all_bytes(std::istream& input) {
@@ -683,6 +681,126 @@ bool operator==(const ODF& odf1, const ODF& odf2)
 	}
 }
 
+ODF operator+(const ODF& left, const ODF& right)
+{
+	return std::visit([](auto&& l, auto&& r) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(r)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l + r; })
+		{
+			return l + r;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, left.content, right.content);
+}
+
+ODF operator-(const ODF& left, const ODF& right)
+{
+	return std::visit([](auto&& l, auto&& r) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(r)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l - r; })
+		{
+			return l - r;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, left.content, right.content);
+}
+
+ODF operator*(const ODF& left, const ODF& right)
+{
+	return std::visit([](auto&& l, auto&& r) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(r)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l * r; })
+		{
+			return l * r;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, left.content, right.content);
+}
+
+ODF operator/(const ODF& left, const ODF& right)
+{
+	return std::visit([](auto&& l, auto&& r) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(r)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l / r; })
+		{
+			return l / r;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, right.content, left.content);
+}
+
+bool operator<(const ODF& left, const ODF& right)
+{
+	return std::visit([](auto&& l, auto&& r) -> bool {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(r)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l < r; })
+		{
+			return l < r;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, left.content, right.content);
+}
+
+bool operator>(const ODF& left, const ODF& right)
+{
+	return std::visit([](auto&& l, auto&& r) -> bool {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(r)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l > r; })
+		{
+			return l > r;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, left.content, right.content);
+}
+
 bool ODF::Type::isString() const
 {
 	return type & TypeSpecifier::FLAG_STRING;
@@ -948,22 +1066,31 @@ ODF::Type ODF::getComplexType() const
 
 ODF::TypeSpecifier ODF::getPrimitiveType() const
 {
-	return TypeSpecifier();
+	return type.type;
 }
 
 ODF::TypeClass ODF::getTypeClass() const
 {
-	return TypeClass();
+	switch (content.index())
+	{
+	case VT_FLOAT:
+	case VT_DOUBLE:
+		return TypeClass::Float;
+	case VT_CSTR:
+	case VT_WSTR:
+		return TypeClass::String;
+	case VT_OBJ:
+		return TypeClass::Object;
+	case VT_LIST:
+		return TypeClass::List;
+	default:
+		return TypeClass::Int;
+	}
 }
 
 unsigned char ODF::getPrecision() const
 {
 	return 0;
-}
-
-ODF::TypeSpecifier ODF::getTypeFromTC(TypeClass tc, unsigned char precision)
-{
-	return TypeSpecifier();
 }
 
 ODF& ODF::operator[](size_t index)
@@ -1914,6 +2041,48 @@ std::optional<ODF> ODF::getAsIfConvertable(const Type& newType) const
 		return std::nullopt;
 }
 
+const char* ODF::c_str() const
+{
+	return std::get<std::string>(content).c_str();
+}
+
+const wchar_t* ODF::w_str() const
+{
+	return std::get<std::wstring>(content).c_str();
+}
+
+size_t ODF::number() const
+{
+	switch (content.index())
+	{
+	case VT_INT8: return std::get<INT_8>(content);
+	case VT_UINT8: return std::get<UINT_8>(content);
+	case VT_INT16: return std::get<INT_16>(content);
+	case VT_UINT16: return std::get<UINT_16>(content);
+	case VT_INT32: return std::get<INT_32>(content);
+	case VT_UINT32: return std::get<UINT_32>(content);
+	case VT_INT64: return std::get<INT_64>(content);
+	case VT_UINT64: return std::get<UINT_64>(content);
+	default:
+		THROW InvalidType("Invalid variant type in ODF::number()");
+	}
+}
+
+float ODF::float32() const
+{
+	return std::get<float>(content);
+}
+
+double ODF::float64() const
+{
+	return std::get<double>(content);
+}
+
+ODF::Object& ODF::object()
+{
+	return std::get<Object>(content);
+}
+
 void ODF::makeList()
 {
 	List& list = content.emplace<List>();
@@ -2279,10 +2448,13 @@ ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 	return saveBody(mem);
 }
 
-ODF::Status ODF::saveToMemory(char* destination, size_t size) const
+ODF::Status ODF::saveToMemory(char* destination, size_t size, size_t* used) const
 {
 	MemoryDataStream mem(destination, size);
-	return saveToMemory(mem);
+	Status stat = saveToMemory(mem);
+	if  (used)
+		*used = mem.pos();
+	return stat;
 }
 
 ODF::Status ODF::loadFromMemory(MemoryDataStream& mem)
@@ -2708,7 +2880,8 @@ void ODF::push_back(const ODF& odf)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<List>().push_back(odf);
+		makeList();
+		push_back(odf);
 	}
 }
 
@@ -2719,7 +2892,8 @@ void ODF::push_front(const ODF& odf)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<List>().push_front(odf);
+		makeList();
+		push_front(odf);
 	}
 }
 
@@ -2745,11 +2919,12 @@ void ODF::insert(size_t where, const ODF& odf)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<List>().insert(where, odf);
+		makeList();
+		insert(where, odf);
 	}
 }
 
-std::optional<size_t> ODF::find(const ODF& odf)
+size_t ODF::find(const ODF& odf)
 {
 	return std::get<List>(content).find(odf);
 }
@@ -2826,14 +3001,14 @@ bool ODF::insert_nothrow(size_t where, const ODF& odf) noexcept
 	}
 }
 
-std::optional<size_t> ODF::find_nothrow(const ODF& odf) noexcept
+size_t ODF::find_nothrow(const ODF& odf) noexcept
 {
 	try {
 		return find(odf);
 	}
 	catch (...)
 	{
-		return (size_t)-1;
+		return npos;
 	}
 }
 
@@ -2869,7 +3044,8 @@ void ODF::insert(const std::string& key, const ODF& odf)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<Object>().insert(key, odf);
+		makeList();
+		insert(key, odf);
 	}
 }
 
@@ -2880,7 +3056,8 @@ void ODF::insert(const Pair& value)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<Object>().insert(value);
+		makeList();
+		insert(value);
 	}
 }
 
@@ -2891,7 +3068,8 @@ void ODF::insert(const std::unordered_map<std::string, ODF>& map)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<Object>().insert(map);
+		makeList();
+		insert(map);
 	}
 }
 
@@ -2902,7 +3080,8 @@ void ODF::insert(const std::map<std::string, ODF>& umap)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<Object>().insert(umap);
+		makeList();
+		insert(umap);
 	}
 }
 
@@ -2913,7 +3092,8 @@ void ODF::insert(const std::vector<Pair>& pairs)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<Object>().insert(pairs);
+		makeList();
+		insert(pairs);
 	}
 }
 
@@ -2924,7 +3104,8 @@ void ODF::insert(const std::initializer_list<Pair>& pairs)
 	}
 	catch (std::bad_variant_access&)
 	{
-		content.emplace<Object>().insert(pairs);
+		makeList();
+		insert(pairs);
 	}
 }
 
@@ -3070,10 +3251,10 @@ void ODF::List::FixedArray::insert(size_t where, const ODF& odf)
 	}
 }
 
-std::optional<size_t> ODF::List::FixedArray::find(const ODF& odf) const
+size_t ODF::List::FixedArray::find(const ODF& odf) const
 {
 	auto it = std::find(list.begin(), list.end(), odf);
-	return it == list.end() ? std::nullopt : std::make_optional(std::distance(list.begin(), it));
+	return it == list.end() ? npos : std::distance(list.begin(), it);
 }
 
 size_t ODF::List::FixedArray::size() const
@@ -3350,6 +3531,16 @@ ODF::Object::Object(const Object::FixedObject& fobj)
 	*this = fobj;
 }
 
+ODF::Object ODF::Object::operator+(const Object& other) const
+{
+	Object obj = other;
+	for (const auto& it : *this)
+	{
+		obj[it.first] = it.second;
+	}
+	return obj;
+}
+
 void ODF::List::clear()
 {
 	std::visit([](AbstractArray& arr) {
@@ -3575,9 +3766,9 @@ void ODF::List::insert(size_t where, const ODF& odf)
 		}, list);
 }
 
-std::optional<size_t> ODF::List::find(const ODF& odf) const
+size_t ODF::List::find(const ODF& odf) const
 {
-	return std::visit([&](const ODF::AbstractArray& base) -> std::optional<size_t> {
+	return std::visit([&](const ODF::AbstractArray& base) -> size_t {
 		return base.find(odf);
 		}, list);
 }
@@ -3751,6 +3942,14 @@ ODF::List::List(const std::initializer_list<ODF>& initializer_list) : List()
 ODF::List::List(const FixedArray& farr) : List()
 {
 	*this = farr;
+}
+
+ODF::List ODF::List::operator+(const List& other) const
+{
+	List lst = other;
+	for (const auto& it : *this)
+		lst.push_back(it);
+	return lst;
 }
 
 ODF::VariantTypeConversionError::VariantTypeConversionError(std::string message) : runtime_error(message)
@@ -4290,10 +4489,10 @@ void ODF::List::MixedArray::insert(size_t where, const ODF& odf)
 	list.insert(list.begin() + where, odf);
 }
 
-std::optional<size_t> ODF::List::MixedArray::find(const ODF& odf) const
+size_t ODF::List::MixedArray::find(const ODF& odf) const
 {
 	auto it = std::find(list.begin(), list.end(), odf);
-	return it == list.end() ? std::nullopt : std::make_optional(std::distance(list.begin(), it));
+	return it == list.end() ? npos : std::distance(list.begin(), it);
 }
 
 size_t ODF::List::MixedArray::size() const
@@ -5271,3 +5470,5 @@ size_t ODF::ArraySpecifierHasher::operator()(const ArraySpecifier& arrSpec)
 	else
 		return hash_combine(hash, FixedArraySpecifierHasher{}(std::get<FixedArraySpecifier>(arrSpec)));
 }
+
+ODF::InvalidOperator::InvalidOperator(const std::string& message) : runtime_error(message) {}

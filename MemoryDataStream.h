@@ -106,6 +106,7 @@ public:
 	char* data() const;
 	size_t size() const;
 	size_t sizeLeft() const;
+	size_t pos();
 	template<typename T>
 	T read()
 	{

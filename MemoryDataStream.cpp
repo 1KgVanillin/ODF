@@ -436,6 +436,14 @@ size_t MemoryDataStream::sizeLeft() const
 	return firstInvalidAddress - current;
 }
 
+size_t MemoryDataStream::pos()
+{
+	if (dynamicAllocation)
+		return dynamicAllocation->size();
+	else
+		return current - start;
+}
+
 char MemoryDataStream::peekPrevious() const
 {
 	if (current <= start)

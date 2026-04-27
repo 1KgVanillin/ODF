@@ -23,7 +23,7 @@
 #else
 #define ODF_THREADSAFE_PRINT
 #endif
-#define ODF_DISABLE_TYPE_PRINT bool odf_print_type_backup = ODF::printType; ODF::printType = false;
+#define ODF_DISABLE_TYPE_PRINT bool odf_print_type_backup = ODF::printType; ODF::printType = false
 #define ODF_RESTORE_TYPE_PRINT ODF::printType = odf_print_type_backup
 
 
@@ -40,8 +40,8 @@ public:
 	
 	struct DF_API ComplexExplicitor
 	{
-	static struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ODF; } __MOBJ;
-	static struct FOBJSTRUCT { private: FOBJSTRUCT() = default; friend class ODF; } __FOBJ;
+		struct OBJSTRUCT { private: OBJSTRUCT() = default; friend class ODF; };
+		struct FOBJSTRUCT { private: FOBJSTRUCT() = default; friend class ODF; };
 	};
 
 	// generic development exception
@@ -89,14 +89,19 @@ public:
 	{
 		InvalidParseInformation(const std::string& message = "InvalidParseInformation exception");
 	};
-	struct VTypeDataAlreadyExists : public std::runtime_error
+	struct DF_API VTypeDataAlreadyExists : public std::runtime_error
 	{
 		VTypeDataAlreadyExists(const std::string& message = "VTypeDataAlreadyExists exception");
 	};
 	// thrown in a typeID is specified as built-in though the runtimeID is specified otherwise.
-	struct InvalidTypeID : public std::runtime_error
+	struct DF_API InvalidTypeID : public std::runtime_error
 	{
 		InvalidTypeID(const std::string& message = "InvalidTypeID exception");
+	};
+
+	struct DF_API InvalidOperator : public std::runtime_error
+	{
+		InvalidOperator(const std::string& message = "custom operator called with invalid types");
 	};
 
 	struct DF_API PrettyPrintInfo
@@ -784,6 +789,9 @@ public:
 		Object(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs);
 		Object(const Object::FixedObject& fobj);
 		template<typename T> Object(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& pairs) { *this = FixedObject(pairs); }
+
+		// concatinates both objects. If a key is present in both objects, the value of the left object (this) is kept
+		Object operator+(const Object& other) const;
 	};
 
 
@@ -804,7 +812,7 @@ public:
 		virtual void erase_range(size_t from, size_t to) = 0;
 		virtual void insert(size_t where, const ODF& odf) = 0;
 
-		virtual std::optional<size_t> find(const ODF& odf) const = 0;
+		virtual size_t find(const ODF& odf) const = 0;
 		virtual size_t size() const = 0;
 		virtual void clear() = 0;
 		virtual void resize(size_t newSize) = 0;
@@ -843,7 +851,7 @@ public:
 			void erase_range(size_t from, size_t to) override;
 			void insert(size_t where, const ODF& odf) override;
 
-			std::optional<size_t> find(const ODF& odf) const override;
+			size_t find(const ODF& odf) const override;
 			size_t size() const override;
 			void clear() override;
 			void resize(size_t newSize) override;
@@ -902,7 +910,7 @@ public:
 			void erase_range(size_t from, size_t to) override;
 			void insert(size_t where, const ODF& odf) override;
 
-			std::optional<size_t> find(const ODF& odf) const override;
+			size_t find(const ODF& odf) const override;
 			size_t size() const override;
 			void clear() override;
 			void resize(size_t newSize) override;
@@ -935,7 +943,7 @@ public:
 		void erase_range(size_t from, size_t to) override;
 		void insert(size_t where, const ODF& odf) override;
 
-		std::optional<size_t> find(const ODF& odf) const override;
+		size_t find(const ODF& odf) const override;
 		size_t size() const override;
 		void clear() override;
 		void resize(size_t newSize) override;
@@ -987,6 +995,8 @@ public:
 		List(const FixedArray& farr);
 		template<typename T> List(const std::initializer_list<T>& initializer_list) : FixedArray(initializer_list) {}
 		template<typename T> List(const std::vector<T>& vector) : FixedArray(vector) {}
+
+		List operator+(const List& other) const;
 	};
 		
 
@@ -1013,15 +1023,11 @@ public:
 	Type type;
 
 	// Type Interface
-	VariantType getVariantType() const;
-	Type getComplexType() const; // TODO
-	TypeSpecifier getPrimitiveType() const; // TODO
+	VariantType getVariantType() const; // same as content.index()
+	Type getComplexType() const;
+	TypeSpecifier getPrimitiveType() const;
 	TypeClass getTypeClass() const; // TODO
 	unsigned char getPrecision() const; // TODO
-	static TypeSpecifier getTypeFromTC(TypeClass tc, unsigned char precision); // TODO
-
-	template<typename T>
-	static VariantType getVariantTypeFromTemplate() {}; // TODO
 
 	// Interface
 
@@ -1166,7 +1172,22 @@ public:
 		return std::get<T>(content);
 	}
 
+	// primitive access functions
+	const char* c_str() const;
+	const wchar_t* w_str() const;
+	size_t number() const;
+	float float32() const;
+	double float64() const;
+	Object& object();
+	List& list();
+
+	// arithmetic operators
+	friend ODF operator+(const ODF& left, const ODF& right);
+	friend ODF operator-(const ODF& left, const ODF& right);
+	friend ODF operator*(const ODF& left, const ODF& right);
+
 	// list functions
+	static constexpr size_t npos = UINT64_MAX;
 	void makeList(); // clears content and converts element to a mixed list
 	void makeList(const Type& elementType); // clears content and converts to fxlist of with elementtype
 	void makeList(const TypeSpecifier& elementType); // clears content and converts to fxlist of with elementtype
@@ -1176,18 +1197,18 @@ public:
 	void erase(size_t index);
 	void erase(size_t index, size_t numberOfElements);
 	void erase_range(size_t from, size_t to);
-	std::optional<size_t> find(const ODF& odf);
+	size_t find(const ODF& odf);
 	bool push_back_nothrow(const ODF& odf) noexcept;
 	bool push_front_nothrow(const ODF& odf) noexcept;
 	bool erase_nothrow(size_t index) noexcept;
 	bool erase_nothrow(size_t index, size_t numberOfElements) noexcept;
 	bool erase_range_nothrow(size_t from, size_t to) noexcept;
 	bool insert_nothrow(size_t where, const ODF& odf) noexcept;
-	std::optional<size_t> find_nothrow(const ODF& odf) noexcept;
+	size_t find_nothrow(const ODF& odf) noexcept;
 
 	// object functions
 	using Pair = Object::Pair;
-	void makeObject(); // clears content and converts element to a mixed object
+	void makeObject(); // clears content and converts this to a mixed object
 	void makeObject(const Type& elementType); // clears content and converts to mxobj with fixType = elementType
 	void makeObject(const TypeSpecifier& elementType); // clears content and converts to mxobj with fixType = elementType
 	virtual void insert(const std::string& key, const ODF& odf);
@@ -1213,7 +1234,7 @@ public:
 	ODF& operator[](std::string_view key); // throws bad_variant_access if called on a object
 
 	// visitors (replacement for Iterators for now, and for advanced or accelerated processing directly in the object)
-	template<typename Func> void visit(Func&& functor)
+	template<typename Func> void for_each(Func&& functor)
 	{
 		std::visit([&](auto& container) {
 			using decaytype = std::decay_t<decltype(container)>;
@@ -1256,7 +1277,7 @@ public:
 
 	// load and save functions
 	Status saveToMemory(MemoryDataStream& mem) const; // main save function
-	Status saveToMemory(char* destination, size_t size) const;
+	Status saveToMemory(char* destination, size_t size, size_t* used = nullptr) const;
 	Status loadFromMemory(MemoryDataStream& mem); // main load function
 	Status loadFromMemory(const char* data, size_t size);
 
@@ -1278,8 +1299,141 @@ private:
 public:
 	// predefined Types:
 
-	static ComplexExplicitor::OBJSTRUCT __MOBJ;
-	static ComplexExplicitor::FOBJSTRUCT __FOBJ;
+	static constexpr ComplexExplicitor::OBJSTRUCT ODF_MOBJ{};
+	static constexpr ComplexExplicitor::FOBJSTRUCT ODF_FOBJ{};
 };
 
 using std::literals::string_literals::operator""s;
+
+ODF operator+(const ODF& left, const ODF& right);
+ODF operator-(const ODF& left, const ODF& right);
+ODF operator*(const ODF& left, const ODF& right);
+ODF operator/(const ODF& left, const ODF& right);
+bool operator<(const ODF& left, const ODF& right);
+bool operator>(const ODF& left, const ODF& right);
+
+template<typename T>
+ODF operator+(const ODF& odf, const T& t)
+{
+	return std::visit([&t](auto&& l) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(t)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l + t; })
+		{
+			return l + t;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, odf.content);
+}
+
+template<typename T>
+ODF operator-(const ODF& odf, const T& t)
+{
+	return std::visit([&t](auto&& l) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(t)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l - t; })
+		{
+			return l - t;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, odf.content);
+}
+
+template<typename T>
+ODF operator*(const ODF& odf, const T& t)
+{
+	return std::visit([&t](auto&& l) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(t)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l * t; })
+		{
+			return l * t;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, odf.content);
+}
+
+template<typename T>
+ODF operator/(const ODF& odf, const T& t)
+{
+	return std::visit([&t](auto&& l) -> ODF {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(t)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l / t; })
+		{
+			return l / t;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, odf.content);
+}
+
+template<typename T>
+bool operator<(const ODF& odf, const T& t)
+{
+	return std::visit([&t](auto&& l) -> bool {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(t)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l < t; })
+		{
+			return l < t;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, odf.content);
+}
+
+template<typename T>
+bool operator>(const ODF& odf, const T& t)
+{
+	return std::visit([&t](auto&& l) -> bool {
+		// extract types of left and right operand
+		using lType = std::decay_t<decltype(l)>;
+		using rType = std::decay_t<decltype(t)>;
+
+		// check wether a '+' operator exists
+		if constexpr (requires { l > t; })
+		{
+			return l > t;
+		}
+		else
+		{
+			THROW ODF::InvalidOperator();
+			return {};
+		}
+		}, odf.content);
+}
