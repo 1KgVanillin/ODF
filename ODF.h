@@ -16,6 +16,11 @@
 #include <optional>
 #include <filesystem>
 
+#define NLOHMANN_JSON_SUPPORT
+#ifdef NLOHMANN_JSON_SUPPORT
+#include "json.hpp"
+#endif
+
 #define ODF_THREADSAFE
 #ifdef ODF_THREADSAFE
 #include <mutex>
@@ -103,6 +108,13 @@ public:
 	{
 		InvalidOperator(const std::string& message = "custom operator called with invalid types");
 	};
+
+#ifdef NLOHMANN_JSON_SUPPORT
+	struct DF_API InvalidJSONObject : public std::runtime_error
+	{
+		InvalidJSONObject(const std::string& message = "json object was invalid (possibly null)");
+	};
+#endif
 
 	struct DF_API PrettyPrintInfo
 	{
@@ -379,9 +391,9 @@ public:
 
 	struct DF_API SizeSpecifier : public AbstractDataObject
 	{
-		static constexpr size_t OverflowSize8bit = 256;
-		static constexpr size_t OverflowSize16bit = 65'536;
-		static constexpr size_t OverflowSize32bit = 4'294'967'296;
+		static constexpr size_t OverflowSize8bit = UINT8_MAX;
+		static constexpr size_t OverflowSize16bit = UINT16_MAX;
+		static constexpr size_t OverflowSize32bit = UINT32_MAX;
 		// no OverflowSize64bit, as it would be zero on a 64bit system
 		size_t actualSize;
 
@@ -393,6 +405,9 @@ public:
 		void saveToMemory(MemoryDataStream& stream, const ConstParseInfo& parseInfo) const override; // implicit size, size specifier specifier returned by sizeSpecifierSpecifier
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override; // must not be used, will throw immediatly. This is because a sizeSpecifierSpecifier is needed to load a sizeSpecifier properlys. Maybe make this safer in the future TODO
 		SizeSpecifier();
+
+		static unsigned char minimumBitPrecision(std::uint64_t num);
+		static unsigned char minimumBitPrecision(std::int64_t num);
 	};
 
 	enum class DF_API TypeClass
@@ -1001,7 +1016,7 @@ public:
 		
 
 	// Value
-	typedef std::variant<
+	typedef std::variant <
 		INT_8, // 0
 		UINT_8, // 1
 		INT_16, // 2
@@ -1042,6 +1057,9 @@ public:
 	const PoolCollection& operator=(const PoolCollection& pc);
 	ODF(const PoolCollection& pc);
 
+	ODF& setNumber(std::uint64_t num); // set type to the smallest fitting unsigned number type and assigns 'num'. Return *this for convenience
+	ODF& setNumber(std::int64_t num); // set type to the smallest fitting signed number type and assigns 'num'. Return *this for convenience
+
 	// operator=
 	ODF& operator=(const ODF& other); // copy
 	// primitive types
@@ -1071,6 +1089,10 @@ public:
 	template<typename T> ODF& operator=(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& initializer_list) { *this = Object::FixedObject(initializer_list); }
 	template<typename T> ODF& operator=(const std::initializer_list<T>& initializer_list) { return *this = List::FixedArray(initializer_list); }
 	
+#ifdef NLOHMANN_JSON_SUPPORT
+	ODF& operator=(const nlohmann::json& json);
+#endif
+
 	operator INT_8();
 	operator UINT_8();
 	operator INT_16();
@@ -1131,6 +1153,10 @@ public:
 		for (const std::pair<std::string, T>& it : pairs)
 			insert(it);
 	}
+
+#ifdef NLOHMANN_JSON_SUPPORT
+	ODF(const nlohmann::json& json);
+#endif
 
 	// ostream printing
 	// print flags

@@ -499,6 +499,11 @@ std::ostream& operator<<(std::ostream& out, const ODF::Type& type)
 	return out;
 }
 
+ODF::ODF(const nlohmann::json& json)
+{
+	*this = json;
+}
+
 std::ostream& ODF::print(std::ostream& out, const ODF& odf, ODF::PrettyPrintInfo ppi)
 {
 	if (auto ptr = std::get_if<INT_8>(&odf.content)) { out << (odf.printType ? "[BYTE] " : "") << (signed short)*ptr; }
@@ -1295,6 +1300,41 @@ ODF::Object& ODF::Object::operator=(const Object::FixedObject& fobj)
 {
 	object.emplace<Object::FixedObject>() = fobj;
 	return *this;
+}
+
+ODF& ODF::operator=(const nlohmann::json& json)
+{
+	if (json.is_boolean())
+		return *this = json.get<bool>();
+	else if (json.is_number_unsigned())
+		return setNumber(json.get<std::uint64_t>());
+	else if (json.is_number_integer())
+		return setNumber(json.get<std::int64_t>());
+	else if (json.is_number_float())
+		return *this = json.get<double>();
+	else if (json.is_string())
+		return *this = json.get<std::string>();
+	else if (json.is_structured())
+	{
+		if (json.is_array())
+		{
+			makeList();
+			for (const auto& it : json)
+				push_back(it);
+			return *this;
+		}
+		else
+		{
+			makeObject();
+			for (auto it = json.begin(); it != json.end(); it++)
+				(*this)[it.key()] = it.value();
+			return *this;
+		}
+	}
+	else
+	{
+		THROW InvalidJSONObject();
+	}
 }
 
 ODF::operator INT_8()
@@ -2421,6 +2461,31 @@ void ODF::SizeSpecifier::loadFromMemory(MemoryDataStream& mem, const ParseInfo& 
 }
 
 ODF::SizeSpecifier::SizeSpecifier() : actualSize(0) {}
+
+unsigned char ODF::SizeSpecifier::minimumBitPrecision(std::uint64_t num)
+{
+	if (num <= UINT8_MAX)
+		return 8;
+	else if (num <= UINT16_MAX)
+		return 16;
+	else if (num <= UINT32_MAX)
+		return 32;
+	else
+		return 64;
+}
+
+unsigned char ODF::SizeSpecifier::minimumBitPrecision(std::int64_t num)
+{
+	int absolute = abs(num);
+	if (absolute <= INT8_MAX)
+		return 8;
+	else if (absolute <= INT16_MAX)
+		return 16;
+	else if (absolute <= INT32_MAX)
+		return 32;
+	else
+		return 64;
+}
 
 #pragma endregion
 #pragma endregion
@@ -4606,6 +4671,40 @@ ODF::ODF(const PoolCollection& pc)
 	*this = pc;
 }
 
+ODF& ODF::setNumber(std::uint64_t num)
+{
+	switch (SizeSpecifier::minimumBitPrecision(num))
+	{
+	case 8:
+		return *this = static_cast<UINT_8>(num);
+	case 16:
+		return *this = static_cast<UINT_16>(num);
+	case 32:
+		return *this = static_cast<UINT_32>(num);
+	case 64:
+		return *this = static_cast<UINT_64>(num);
+	default:
+		THROW InvalidCondition();
+	}
+}
+
+ODF& ODF::setNumber(std::int64_t num)
+{
+	switch (SizeSpecifier::minimumBitPrecision(num))
+	{
+	case 8:
+		return *this = static_cast<INT_8>(num);
+	case 16:
+		return *this = static_cast<INT_16>(num);
+	case 32:
+		return *this = static_cast<INT_32>(num);
+	case 64:
+		return *this = static_cast<INT_64>(num);
+	default:
+		THROW InvalidCondition();
+	}
+}
+
 void ODF::PoolCollection::addPool(Pool pool)
 {
 	importPools.push_back(pool);
@@ -4980,11 +5079,11 @@ unsigned char ODF::VTypeInfo::TypeID::addSSS(unsigned char typeSpec) const
 
 unsigned char ODF::VTypeInfo::TypeID::smallestSSS(size_t type)
 {
-	if (type <= UINT8_MAX)
+	if (type <= SizeSpecifier::OverflowSize8bit)
 		return 1;
-	if (type <= UINT16_MAX)
+	if (type <= SizeSpecifier::OverflowSize16bit)
 		return 2;
-	if (type <= UINT32_MAX)
+	if (type <= SizeSpecifier::OverflowSize32bit)
 		return 3;
 	THROW InvalidTypeID("type id too large for calculating secondary size specifier");
 }
@@ -5472,3 +5571,5 @@ size_t ODF::ArraySpecifierHasher::operator()(const ArraySpecifier& arrSpec)
 }
 
 ODF::InvalidOperator::InvalidOperator(const std::string& message) : runtime_error(message) {}
+
+ODF::InvalidJSONObject::InvalidJSONObject(const std::string& message) : runtime_error(message) {}
