@@ -436,7 +436,7 @@ size_t MemoryDataStream::sizeLeft() const
 	return firstInvalidAddress - current;
 }
 
-size_t MemoryDataStream::pos()
+size_t MemoryDataStream::pos() const
 {
 	if (dynamicAllocation)
 		return dynamicAllocation->size();
@@ -465,6 +465,17 @@ void MemoryDataStream::setPrevious(char byte)
 bool MemoryDataStream::empty() const
 {
 	return !size();
+}
+
+bool MemoryDataStream::saveToFile(const std::string& file) const
+{
+	std::ofstream out(file, std::ios::binary);
+	if (out.fail())
+		return false;
+	
+	out.write(start, pos());
+	out.close();
+	return true;
 }
 
 MemoryDataStream::MemoryDataStream(size_t size)

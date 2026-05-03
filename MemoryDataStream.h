@@ -3,6 +3,7 @@
 #include <functional>
 #include <stdexcept>
 #include <iostream>
+#include <fstream>
 #include "Definitions.h"
 
 // lets make a safe pointer quicky. Throws std::out_of_range if invalid access
@@ -106,7 +107,7 @@ public:
 	char* data() const;
 	size_t size() const;
 	size_t sizeLeft() const;
-	size_t pos();
+	size_t pos() const;
 	template<typename T>
 	T read()
 	{
@@ -124,6 +125,8 @@ public:
 	char peekPrevious() const;
 	void setPrevious(char byte);
 	bool empty() const;
+
+	bool saveToFile(const std::string& file) const;
 
 	MemoryDataStream(size_t size = 0); // allocates own data, if 0 specified, dynamic allocation on write() calls.
 	MemoryDataStream(char* data);

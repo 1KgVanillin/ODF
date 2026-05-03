@@ -102,6 +102,7 @@ ODF::Status ODF::Type::saveToMemory(MemoryDataStream& mem, const ConstParseInfo&
 			localParseInfo.flags &= ~ConstParseInfo::FLAG_NO_USETYPE; // allow usetypes, as the current type can no longer try to use itself and the current type can use USETYPEs for subtypes for memory efficiency.
 			localParseInfo.flags |= ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE; // don't allow deftypes, as the program is currently in a specifier which shouldn't be interrupted by for example DEFTYPEs
 			MixedArraySpecifier& mlistSpec = std::get<MixedArraySpecifier>(listSpec);
+			
 			mlistSpec.saveToMemory(mem, localParseInfo);
 			return Status::Ok;
 		}
@@ -584,7 +585,6 @@ std::ostream& ODF::print(std::ostream& out, const ODF::Object& obj, ODF::PrettyP
 
 std::ostream& ODF::print(std::ostream& out, const ODF::List& list, ODF::PrettyPrintInfo ppi)
 {
-	ppi.pre(out);
 	if (list.isMixed())
 	{
 		out << "<MX>\n";
@@ -599,10 +599,9 @@ std::ostream& ODF::print(std::ostream& out, const ODF::List& list, ODF::PrettyPr
 		{
 			ppi.pre(out);
 			print(out << i++ << ": ", odf, ppi);
-			if (i != list.size() - 1)
+			if (i != list.size())
 				out << "\n";
 			ppi.post(out);
-			i++;
 		}
 		ppi.indent--;
 	}
@@ -905,6 +904,32 @@ ODF::MixedObjectSpecifier* ODF::Type::mixedObjectSpecifier() const
 		if (MixedObjectSpecifier* mobjSpec = std::get_if<MixedObjectSpecifier>(objSpec))
 			return mobjSpec;
 	return nullptr;
+}
+
+std::variant<ODF::MixedArraySpecifier*, ODF::FixedArraySpecifier*> ODF::Type::arraySpecifierPtr() const
+{
+	ArraySpecifier* arrspec = arraySpecifier();
+	if (!arrspec)
+	{
+		THROW InvalidType();
+	}
+	if (arrspec->index())
+		return &std::get<FixedArraySpecifier>(*arrspec);
+	else
+		return &std::get<MixedArraySpecifier>(*arrspec);
+}
+
+std::variant<ODF::MixedObjectSpecifier*, ODF::FixedObjectSpecifier*> ODF::Type::objectSpecifierPtr() const
+{
+	ObjectSpecifier* objspec = objectSpecifier();
+	if (!objspec)
+	{
+		THROW InvalidType();
+	}
+	if (objspec->index())
+		return &std::get<FixedObjectSpecifier>(*objspec);
+	else
+		return &std::get<MixedObjectSpecifier>(*objspec);
 }
 
 bool ODF::Type::isConvertableTo(const Type& other) const
@@ -2492,11 +2517,7 @@ unsigned char ODF::SizeSpecifier::minimumBitPrecision(std::int64_t num)
 
 ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 {
-	// update the header if it includes specifiers that could have been altered after construction
-	if (auto ptr = std::get_if<Object>(&content))
-		ptr->updateKeys(std::get<ObjectSpecifier>(*type.complexSpec));
-	else if (auto ptr = std::get_if<List>(&content))
-		ptr->updateSpec(std::get<ArraySpecifier>(*type.complexSpec));
+	updateComplexSpecifier();
 
 	ConstParseInfo parseInfo(pools, localPool, vtypeinfo);
 
@@ -2505,7 +2526,7 @@ ODF::Status ODF::saveToMemory(MemoryDataStream& mem) const
 		vtypeinfo->saveToMemory(mem, parseInfo);
 
 	// save header, reset flags
-	parseInfo.flags = 0;
+	parseInfo.flags = ConstParseInfo::FLAG_NO_IMPLICIT_DEFTYPE;
 	if (Status error = type.saveToMemory(mem, parseInfo))
 		return error;
 	
@@ -2765,6 +2786,15 @@ ODF::Status ODF::loadFromStream(std::istream& in)
 	return Status::Ok;
 }
 
+void ODF::updateComplexSpecifier() const
+{
+	// update the header if it includes specifiers that could have been altered after construction
+	if (auto ptr = std::get_if<Object>(&content))
+		ptr->updateKeys(std::get<ObjectSpecifier>(*type.complexSpec));
+	else if (auto ptr = std::get_if<List>(&content))
+		ptr->updateSpec(std::get<ArraySpecifier>(*type.complexSpec));
+}
+
 ODF::Status ODF::saveBody(MemoryDataStream& mem) const
 {
 	// primtive types
@@ -2821,7 +2851,7 @@ ODF::Status ODF::saveBody(MemoryDataStream& mem) const
 
 ODF::Status ODF::saveObject(MemoryDataStream& mem) const
 {
-	std::get<Object>(content).saveToMemory(mem, std::get<ObjectSpecifier>(*type.complexSpec));
+	std::get<Object>(content).saveToMemory(mem);
 	return Status::Ok;
 }
 
@@ -2884,14 +2914,14 @@ ODF::Status ODF::loadBody(MemoryDataStream& mem)
 ODF::Status ODF::loadObject(MemoryDataStream& mem)
 {
 	Object& obj = content.emplace<Object>();
-	obj.loadFromMemory(mem, std::get<ObjectSpecifier>(*type.complexSpec));
+	obj.loadFromMemory(mem, type.objectSpecifierPtr());
 	return Status::Ok;
 }
 
 ODF::Status ODF::loadArray(MemoryDataStream& mem)
 {
 	List& arr = content.emplace<List>();
-	arr.loadFromMemory(mem, std::get<ArraySpecifier>(*type.complexSpec));
+	arr.loadFromMemory(mem, type.arraySpecifierPtr());
 	return Status::Ok;
 }
 
@@ -3447,26 +3477,23 @@ void ODF::List::FixedArray::saveToMemory(MemoryDataStream& mem) const
 		it.saveBody(mem);
 }
 
-void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec)
+void ODF::List::FixedArray::loadFromMemory(MemoryDataStream& mem)
 {
 	// clear existing data
 	list.clear();
 
 	// resize list and load each item
-	const FixedArraySpecifier& fspec = std::get<FixedArraySpecifier>(spec);
-	list.resize(fspec.size.actualSize);
-	fixType = fspec.fixType;
+	list.resize(spec->size.actualSize);
+	fixType = spec->fixType;
 	for (ODF& odf : list)
 	{
-		odf.type = fspec.fixType;
+		odf.type = spec->fixType;
 		odf.loadBody(mem);
 		odf.immutable();
 	}
 }
 
-ODF::List::FixedArray::FixedArray()
-{
-}
+ODF::List::FixedArray::FixedArray() : spec(nullptr) {}
 
 void ODF::List::MixedArray::updateSpec(ArraySpecifier& spec) const
 {
@@ -3486,26 +3513,23 @@ void ODF::List::MixedArray::saveToMemory(MemoryDataStream& mem) const
 		it.saveBody(mem);
 }
 
-void ODF::List::MixedArray::loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec)
+void ODF::List::MixedArray::loadFromMemory(MemoryDataStream& mem)
 {
 	// clear old data
 	list.clear();
 
 	// load new data with specifiers
-	const MixedArraySpecifier& mspec = std::get<MixedArraySpecifier>(spec);
-	list.resize(mspec.types.size());
+	list.resize(spec->types.size());
 	for (size_t i = 0; i < list.size(); i++)
 	{
-		list[i].type = mspec.types[i];
+		list[i].type = spec->types[i];
 		list[i].loadBody(mem);
 	}
 }
 
-ODF::List::MixedArray::MixedArray()
-{
-}
+ODF::List::MixedArray::MixedArray() : spec(nullptr) {}
 
-ODF::List::MixedArray::MixedArray(const std::initializer_list<ODF>& initializer_list)
+ODF::List::MixedArray::MixedArray(const std::initializer_list<ODF>& initializer_list) : spec(nullptr)
 {
 	for (const ODF& odf : initializer_list)
 		list.push_back(odf);
@@ -3627,18 +3651,26 @@ void ODF::Object::updateKeys(ObjectSpecifier& spec) const
 		}, object);
 }
 
-void ODF::Object::loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec)
+void ODF::Object::loadFromMemory(MemoryDataStream& mem, const std::variant<MixedObjectSpecifier*, FixedObjectSpecifier*>& specifier)
 {
-	if (spec.index())
-		object.emplace<FixedObject>().loadFromMemory(mem, spec);
+	if (specifier.index())
+	{
+		FixedObject& fobj = object.emplace<FixedObject>();
+		fobj.spec = std::get<FixedObjectSpecifier*>(specifier);
+		fobj.loadFromMemory(mem);
+	}
 	else
-		object.emplace<MixedObject>().loadFromMemory(mem, spec);
+	{
+		MixedObject& mobj = object.emplace<MixedObject>();
+		mobj.spec = std::get<MixedObjectSpecifier*>(specifier);
+		mobj.loadFromMemory(mem);
+	}
 }
 
-void ODF::Object::saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const
+void ODF::Object::saveToMemory(MemoryDataStream& mem) const
 {
-	std::visit([&mem, &spec](const AbstractObject& aobj) {
-		aobj.saveToMemory(mem, spec);
+	std::visit([&mem](const AbstractObject& aobj) {
+		aobj.saveToMemory(mem);
 		}, object);
 }
 
@@ -3950,12 +3982,20 @@ void ODF::List::saveToMemory(MemoryDataStream& mem) const
 		}, list);
 }
 
-void ODF::List::loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec)
+void ODF::List::loadFromMemory(MemoryDataStream& mem, const std::variant<MixedArraySpecifier*, FixedArraySpecifier*>& specifier)
 {
-	if (spec.index())
-		list.emplace<FixedArray>().loadFromMemory(mem, spec);
+	if (specifier.index())
+	{
+		FixedArray& farr = list.emplace<FixedArray>();
+		farr.spec = std::get<FixedArraySpecifier*>(specifier);
+		farr.loadFromMemory(mem);
+	}
 	else
-		list.emplace<MixedArray>().loadFromMemory(mem, spec);
+	{
+		MixedArray& marr = list.emplace<MixedArray>();
+		marr.spec = std::get<MixedArraySpecifier*>(specifier);
+		marr.loadFromMemory(mem);
+	}
 }
 
 ODF::List& ODF::List::operator=(const List& other)
@@ -4091,44 +4131,55 @@ void ODF::Object::MixedObject::updateKeys(ObjectSpecifier& spec) const
 	mspec.properties.clear();
 
 	// insert new properties
-	for (const Pair& it : map)
-		mspec.properties[it.first] = it.second.type;
+	if (mspec.iterationOrder.size())
+	{
+		for (const Pair& it : map)
+		{
+			it.second.updateComplexSpecifier(); // update the specifier recursively. result saved in it.second.type.complexSpec
+			mspec.properties[it.first] = it.second.type; // it.second.type is copied, including it.second.type.complexSpec, which was previously updated
+		}
+	}
+	else
+	{
+		for (const Pair& it : map)
+		{
+			it.second.updateComplexSpecifier(); // update the specifier recursively. result saved in it.second.type.complexSpec
+			mspec.properties[it.first] = it.second.type; // it.second.type is copied, including it.second.type.complexSpec, which was previously updated
+			mspec.iterationOrder.push_back(it.first);
+		}
+	}
 }
 
-void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const
+void ODF::Object::MixedObject::saveToMemory(MemoryDataStream& mem) const
 {
 	// save bodies seperately
-	const MixedObjectSpecifier& mspec = std::get<MixedObjectSpecifier>(spec);
-	for (const auto& it : mspec.iterationOrder)
+	for (const auto& it : spec->iterationOrder)
 		map.at(it).saveBody(mem);
 }
 
-void ODF::Object::MixedObject::loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec)
+void ODF::Object::MixedObject::loadFromMemory(MemoryDataStream& mem)
 {
 	// clear previous content
 	map.clear();
 
 	// add all keys and their type, while simultaniously loading the elements in the correct order
-	const MixedObjectSpecifier& mspec = std::get<MixedObjectSpecifier>(spec);
-	for (const auto& it : mspec.iterationOrder)
+	for (const auto& it : spec->iterationOrder)
 	{
 		ODF& newElement = map[it];
-		newElement.type = mspec.properties.at(it);
+		newElement.type = spec->properties.at(it);
 		newElement.loadBody(mem);
 	}
 }
 
-ODF::Object::MixedObject::MixedObject()
-{
-}
+ODF::Object::MixedObject::MixedObject() : spec(nullptr) {}
 
-ODF::Object::MixedObject::MixedObject(const std::initializer_list<Pair>& elements)
+ODF::Object::MixedObject::MixedObject(const std::initializer_list<Pair>& elements) : spec(nullptr)
 {
 	for (const Pair& it : elements)
 		insert(it);
 }
 
-ODF::Object::MixedObject::MixedObject(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs)
+ODF::Object::MixedObject::MixedObject(const std::initializer_list<std::variant<Pair, ComplexExplicitor::OBJSTRUCT>>& pairs) : spec(nullptr)
 {
 	for (const std::variant<Pair, ComplexExplicitor::OBJSTRUCT>& it : pairs)
 		if (auto ptr = std::get_if<Pair>(&it))
@@ -4224,7 +4275,7 @@ void ODF::Object::FixedObject::clear()
 	map.clear();
 }
 
-ODF::Object::AbstractObject::ConstIterator ODF::Object::FixedObject::begin() const noexcept
+ODF::AbstractObject::ConstIterator ODF::Object::FixedObject::begin() const noexcept
 {
 	return map.begin();
 }
@@ -4234,7 +4285,7 @@ ODF::Object::Iterator ODF::Object::FixedObject::begin() noexcept
 	return map.begin();
 }
 
-ODF::Object::AbstractObject::ConstIterator ODF::Object::FixedObject::end() const noexcept
+ODF::AbstractObject::ConstIterator ODF::Object::FixedObject::end() const noexcept
 {
 	return map.end();
 }
@@ -4322,23 +4373,21 @@ void ODF::Object::FixedObject::updateKeys(ObjectSpecifier& spec) const
 		fspec.keys.push_back(it.first);
 }
 
-void ODF::Object::FixedObject::saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const
+void ODF::Object::FixedObject::saveToMemory(MemoryDataStream& mem) const
 {
 	// save bodies seperately
-	const FixedObjectSpecifier& fspec = std::get<FixedObjectSpecifier>(spec);
-	for (const auto& it : fspec.keys)
+	for (const auto& it : spec->keys)
 		map.at(it).saveBody(mem);
 }
 
-void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec)
+void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem)
 {
 	// clear all previous elemets
 	map.clear();
 
 	// add all keys, and load all bodies in the same order
-	const FixedObjectSpecifier& fspec = std::get<FixedObjectSpecifier>(spec);
-	fixType = fspec.fixType;
-	for (const std::string& it : fspec.keys)
+	fixType = spec->fixType;
+	for (const std::string& it : spec->keys)
 	{
 		ODF& newElement = map[it];
 		newElement.type = fixType;
@@ -4347,9 +4396,7 @@ void ODF::Object::FixedObject::loadFromMemory(MemoryDataStream& mem, const Objec
 	}
 }
 
-ODF::Object::FixedObject::FixedObject()
-{
-}
+ODF::Object::FixedObject::FixedObject() : spec(nullptr) {}
 
 ODF::InvalidTypeMutation::InvalidTypeMutation(const std::string& message) : runtime_error(message) {}
 
@@ -5442,7 +5489,10 @@ ODF::ParseInfo::ParseInfo(const std::shared_ptr<PoolCollection>& pools, const st
 	this->vtypeinfo = vtypeinfo;
 }
 
-ODF::ConstParseInfo::ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), vtypeinfo(vtypeinfo), flags(0) {}
+ODF::ConstParseInfo::ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo) : pools(pools), localPool(localPool), flags(0)
+{
+	this->vtypeinfo = vtypeinfo ? vtypeinfo : vtypeinfo = std::make_shared<VTypeInfo>();
+}
 
 ODF::InvalidParseInformation::InvalidParseInformation(const std::string& message) : runtime_error(message) {}
 
@@ -5483,7 +5533,7 @@ void ODF::PrettyPrintInfo::pre(std::ostream& out)
 		if (i == indent - 1)
 			out << "+--";
 		else
-			out << "|  ";
+			out << "   ";
 	}
 }
 

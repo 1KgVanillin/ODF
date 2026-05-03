@@ -1,0 +1,64 @@
+===== AC POST =====
+[VT_OBJ] <MX>
++--["properties"]:  [VT_LIST] <MX>
+   +--0: [CSTR] natural
+   +--1: [CSTR] heavy
+   +--2: [CSTR] radioactive
+   +--3: [CSTR] artificial
++--["@modified"]:  [CSTR] 2025-09-25T09:10:43.005Z
++--["atomic_mass"]:  [VT_OBJ] <MX>
+   +--["unit"]:  [CSTR] u
+   +--["value"]:  [DOUBLE] 227.028
++--["wiki"]:  [VT_OBJ] <MX>
+   +--["de"]:  [CSTR] Actinium
+   +--["en"]:  [CSTR] Actinium
+   +--["fr"]:  [CSTR] Actinium
++--["shell"]:  [VT_LIST] <MX>
+   +--0: [UBYTE] 2
+   +--1: [UBYTE] 8
+   +--2: [UBYTE] 18
+   +--3: [UBYTE] 32
+   +--4: [UBYTE] 18
+   +--5: [UBYTE] 9
+   +--6: [UBYTE] 2
++--["classification"]:  [VT_OBJ] <MX>
+   +--["cas"]:  [VT_LIST] <MX>
+      +--0: [VT_OBJ] <MX>
+EMPTY
+
+   +--["echa"]:  [CSTR] [null]
+   +--["eg"]:  [CSTR] [null]
++--["goldschmidt"]:  [CSTR] synthetic
++--["electron_config"]:  [CSTR] Rn 6d[1] 7s[2]
++--["weblinks"]:  [VT_LIST] <MX>
+   +--0: [VT_OBJ] <MX>
+EMPTY
+
+   +--1: [VT_OBJ] <MX>
+EMPTY
+
+   +--2: [VT_OBJ] <MX>
+EMPTY
+
++--["block"]:  [CSTR] d
++--["column"]:  [UBYTE] 3
++--["era"]:  [CSTR] classifying
++--["group"]:  [UBYTE] 20
++--["ionization"]:  [VT_OBJ] <MX>
+   +--["unit"]:  [CSTR] eV
+   +--["values"]:  [VT_LIST] <MX>
+      +--0: [DOUBLE] 5.38023
+      +--1: [DOUBLE] 11.75
+      +--2: [DOUBLE] 17.431
+      +--3: [DOUBLE] 44.8
+      +--4: [UBYTE] 55
++--["names"]:  [VT_OBJ] <MX>
+   +--["de"]:  [CSTR] Actinium
+   +--["en"]:  [CSTR] Actinium
+   +--["fr"]:  [CSTR] Actinium
+   +--["la"]:  [CSTR] Actinium
++--["natural_occurrence"]:  [CSTR] decay
++--["number"]:  [UBYTE] 89
++--["period"]:  [UBYTE] 7
++--["set"]:  [CSTR] actinoide
++--["symbol"]:  [CSTR] Ac

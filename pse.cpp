@@ -245,7 +245,10 @@ static void set(ODF& odf, const std::string& key, const json& val)
 	size_t slash = key.find('/');
 	if (slash == std::string::npos)
 	{
-		odf[key] = val;
+		if (val.is_null())
+			odf[key] = "[null]";
+		else
+			odf[key] = val;
 		return;
 	}
 
@@ -292,10 +295,10 @@ void pse()
 
 	using List = std::vector<std::string>;
 	std::vector<std::string> keys;
-	
+
 	using json = nlohmann::json;
 	json jpse = json::parse(readfile("test/pse.json"));
-	
+
 	std::vector<std::pair<std::string, List>> keyLists;
 	keyLists.reserve(jpse.size());
 	for (auto it = jpse.begin(); it != jpse.end(); it++)
@@ -343,10 +346,11 @@ void pse()
 	{
 		json& element = it.value();
 		json& processedElement = processedPSE[it.key()];
+		ODF& odfElement = odfPSE[it.key()];
 		for (const auto& key : genericKeys)
 		{
 			copyKey(processedElement, key, element);
-			copyKey(odfPSE, key, element);
+			copyKey(odfElement, key, element);
 		}
 	}
 
@@ -355,17 +359,34 @@ void pse()
 	out.write(dump.c_str(), dump.size());
 	out.close();
 
+	std::ofstream log_orig("test/orig.odf.log"), log_post("test/post.odf.log"), ac_orig("test/ac.orig.odf.log"), ac_post("test/ac.post.odf.log");
 	cout << "cosntructed processed source json\n";
-	cout << "===== ODF ======\n" << odfPSE << "\n";
+
+	// TODO check iteration order. in mixed object specifier, and wether it is updated before saving and wether it should be updated.
+	// New object = update
+	// Loaded object = don't update
+	// if updated from new object = update
+	// if update from loaded object = don't update
+
+	MemoryDataStream mem(102400);
 
 
-	// transfer structure into a ODF type.
+	odfPSE.saveToMemory(mem);
+	mem.saveToFile("test/pse.odf");
 
-	// slice the selected keys into a seperate json object
+	mem.reset();
 
-	// save json object without formatting
+	ODF load;
+	load.loadFromMemory(mem);
 
-	// save odf
+	log_orig << "===== ODF ======\n" << odfPSE << "\n";
+	log_post << "===== LOADED =====\n" << load << "\n";
 
-	// compare size
+	ac_orig << "===== AC PRE =====\n" << odfPSE.at("ac");
+	ac_post << "===== AC POST =====\n" << load.at("ac");
+
+	log_post.close();
+	log_orig.close();
+	ac_orig.close();
+	ac_post.close();
 }

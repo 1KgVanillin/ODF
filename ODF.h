@@ -288,12 +288,12 @@ public:
 		std::shared_ptr<const PoolType> localPool;
 		std::shared_ptr<const VTypeInfo> vtypeinfo;
 
-		ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, const std::shared_ptr<const VTypeInfo>& vtypeinfo);
+		ConstParseInfo(const std::shared_ptr<const PoolCollection>& pools, const std::shared_ptr<const PoolType>& localPool, std::shared_ptr<VTypeInfo>& vtypeinfo);
 	};
 	// both shared_ptrs are used as optional (nullptr if no value)
 
 	std::shared_ptr<PoolType> localPool; // file scope. only created for the root element
-	std::shared_ptr<VTypeInfo> vtypeinfo; // holds virtual type information. only created for the root element
+	mutable std::shared_ptr<VTypeInfo> vtypeinfo; // holds virtual type information. only created for the root element
 
 	// random constants
 	//static constexpr unsigned char PRECISION_FLAG_CONVERSION_NEEDED = 0b10000000;
@@ -427,20 +427,20 @@ public:
 
 	// variant type definitions
 	typedef size_t VariantType;
-	static constexpr VariantType VT_INT8 = 0;
-	static constexpr VariantType VT_UINT8 = 1;
-	static constexpr VariantType VT_INT16 = 2;
-	static constexpr VariantType VT_UINT16 = 3;
-	static constexpr VariantType VT_INT32 = 4;
-	static constexpr VariantType VT_UINT32 = 5;
-	static constexpr VariantType VT_INT64 = 6;
-	static constexpr VariantType VT_UINT64 = 7;
-	static constexpr VariantType VT_FLOAT = 8;
-	static constexpr VariantType VT_DOUBLE = 9;
-	static constexpr VariantType VT_CSTR = 10;
-	static constexpr VariantType VT_WSTR = 11;
-	static constexpr VariantType VT_OBJ = 12;
-	static constexpr VariantType VT_LIST = 13;
+	static constexpr VariantType VT_INT8 = 1;
+	static constexpr VariantType VT_UINT8 = 2;
+	static constexpr VariantType VT_INT16 = 3;
+	static constexpr VariantType VT_UINT16 = 4;
+	static constexpr VariantType VT_INT32 = 5;
+	static constexpr VariantType VT_UINT32 = 6;
+	static constexpr VariantType VT_INT64 = 7;
+	static constexpr VariantType VT_UINT64 = 8;
+	static constexpr VariantType VT_FLOAT = 9;
+	static constexpr VariantType VT_DOUBLE = 10;
+	static constexpr VariantType VT_CSTR = 11;
+	static constexpr VariantType VT_WSTR = 12;
+	static constexpr VariantType VT_OBJ = 13;
+	static constexpr VariantType VT_LIST = 14;
 	struct DF_API VariantTypeConversionError : std::runtime_error { VariantTypeConversionError(std::string message = "Invalid Conversion from type [NULL] or [undefined] to ODF::VariantType"); };
 
 	typedef std::variant<MixedObjectSpecifier, FixedObjectSpecifier> ObjectSpecifier;
@@ -476,6 +476,8 @@ public:
 		ObjectSpecifier* objectSpecifier() const;
 		FixedObjectSpecifier* fixedObjectSpecifier() const;
 		MixedObjectSpecifier* mixedObjectSpecifier() const;
+		std::variant<MixedArraySpecifier*, FixedArraySpecifier*> arraySpecifierPtr() const;
+		std::variant<MixedObjectSpecifier*, FixedObjectSpecifier*> objectSpecifierPtr() const;
 
 		bool isConvertableTo(const Type& other) const;
 		bool isUnsigned() const; // returs false if not an interger type
@@ -539,7 +541,7 @@ public:
 	struct DF_API FixedObjectSpecifier : public AbstractDataObject
 	{
 		Type fixType;
-		std::vector<std::string> keys;
+		std::vector<std::string> keys; // iterationOrder member isn't needed the vector already defines the order
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
@@ -552,8 +554,8 @@ public:
 	struct DF_API MixedObjectSpecifier : public AbstractDataObject
 	{
 		typedef const std::pair<std::string, Type>& ObjectIterator;
-		std::unordered_map<std::string, Type> properties; // use an ordered map to ensure iteration order is always the same.
-		std::vector<std::string> iterationOrder;
+		std::unordered_map<std::string, Type> properties;
+		std::vector<std::string> iterationOrder; // iteration order during saving and in saving of body must be the same because the body doesn't contains the actual keys anymore
 		void saveToMemory(MemoryDataStream& mem, const ConstParseInfo& parseInfo) const override;
 		void loadFromMemory(MemoryDataStream& mem, const ParseInfo& parseInfo) override;
 	};
@@ -624,17 +626,22 @@ public:
 		// update the keys, save the specifier, save the object.
 		// or loadFromMemory with specifier (load specifier, then load object)
 		virtual void updateKeys(ObjectSpecifier& spec) const = 0;
-		virtual void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const = 0;
-		virtual void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) = 0;
+		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem) = 0;
 	};
 
 	// The just like with the Array, the AbstractObject is an implementation of the MixedAObject. The MixedObject inherits all functions from it and adds loadFromMemory
 	// The FIxedObject inherits the functions of the AbstractObjects, adds a loadFromMemory and overwrites all isnertion and access functions to perform type checks
-	class DF_API Object :  public AbstractObject, public AbstractComplexDataObject
+	class DF_API Object :  public AbstractComplexDataObject
 	{
 	public:
+		using Iterator = AbstractObject::Iterator;
+		using ConstIterator = AbstractObject::ConstIterator;
+		using IteratorType = AbstractObject::IteratorType;
+		using Pair = AbstractObject::Pair;
 		class DF_API FixedObject : public AbstractObject
 		{
+			FixedObjectSpecifier* spec;
 			std::unordered_map<std::string, ODF> map;
 			Type fixType;
 		public:
@@ -667,36 +674,36 @@ public:
 			const Type& getType() const; // returns the type of the elements contained in the object
 			
 			void updateKeys(ObjectSpecifier& spec) const override;
-			void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const override;
-			void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
+			void saveToMemory(MemoryDataStream& mem) const override;
+			void loadFromMemory(MemoryDataStream& mem) override;
 
 			FixedObject();
 			template<typename T>
-			FixedObject(const std::initializer_list<std::pair<std::string, T>>& initializer_list)
+			FixedObject(const std::initializer_list<std::pair<std::string, T>>& initializer_list) : spec(nullptr)
 			{
 				for (const std::pair<std::string, T>& it : initializer_list)
 					insert(it);
 			}
 			template<typename T>
-			FixedObject(const std::map<std::string, T>& map)
+			FixedObject(const std::map<std::string, T>& map) : spec(nullptr)
 			{
 				for (const std::pair<std::string, T>& it : map)
 					insert(it);
 			}
 			template<typename T>
-			FixedObject(const std::unordered_map<std::string, T>& umap)
+			FixedObject(const std::unordered_map<std::string, T>& umap) : spec(nullptr)
 			{
 				for (const std::pair<std::string, T>& it : umap)
 					insert(it);
 			}
 			template<typename T>
-			FixedObject(const std::vector<std::pair<std::string, T>>& pairs)
+			FixedObject(const std::vector<std::pair<std::string, T>>& pairs) : spec(nullptr)
 			{
 				for (const std::pair<std::string, T>& it : pairs)
 					insert(it);
 			}
 			template<typename T>
-			FixedObject(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& pairs)
+			FixedObject(const std::initializer_list<std::variant<std::pair<std::string, T>, ComplexExplicitor::FOBJSTRUCT>>& pairs) : spec(nullptr)
 			{
 				for (const std::variant<std::pair<std::string, T>, ComplexExplicitor>& it : pairs)
 					if (!it.index())
@@ -708,6 +715,7 @@ public:
 
 		class DF_API MixedObject : public AbstractObject
 		{
+			MixedObjectSpecifier* spec;
 			std::unordered_map<std::string, ODF> map;
 		public:
 			void insert(const std::string& key, const ODF& odf) override;
@@ -734,8 +742,8 @@ public:
 			std::unordered_map<std::string, ODF>& getObjectContainer() override;
 
 			void updateKeys(ObjectSpecifier& spec) const override;
-			void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const override;
-			void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
+			void saveToMemory(MemoryDataStream& mem) const override;
+			void loadFromMemory(MemoryDataStream& mem) override;
 
 			MixedObject();
 			MixedObject(const std::initializer_list<Pair>& elements);
@@ -746,32 +754,32 @@ public:
 		
 		std::variant<FixedObject, MixedObject> object;
 
-		void insert(const std::string& key, const ODF& odf) override;
-		void insert(const Pair& value) override;
-		void insert(const std::map<std::string, ODF>& map) override;
-		void insert(const std::unordered_map<std::string, ODF>& umap) override;
-		void insert(const std::vector<Pair>& pairs) override;
-		void insert(const std::initializer_list<Pair>& pairs) override;
+		void insert(const std::string& key, const ODF& odf);
+		void insert(const Pair& value);
+		void insert(const std::map<std::string, ODF>& map);
+		void insert(const std::unordered_map<std::string, ODF>& umap);
+		void insert(const std::vector<Pair>& pairs);
+		void insert(const std::initializer_list<Pair>& pairs);
 		virtual void erase(const std::string& key);
 
-		bool contains(const std::string& key) const override;
-		size_t count(const std::string& key) const override;
-		size_t size() const override;
-		void clear() override;
+		bool contains(const std::string& key) const;
+		size_t count(const std::string& key) const;
+		size_t size() const;
+		void clear();
 
-		ODF& operator[](const std::string& key) override; // also overwritten by FixedObject, as it could insert elements
-		ODF& at(const std::string& key) override;
-		const ODF& at(const std::string& key) const override;
+		ODF& operator[](const std::string& key); // also overwritten by FixedObject, as it could insert elements
+		ODF& at(const std::string& key);
+		const ODF& at(const std::string& key) const;
 
-		ConstIterator begin() const noexcept override;
-		Iterator begin() noexcept override;
-		ConstIterator end() const noexcept override;
-		Iterator end() noexcept override;
-		std::unordered_map<std::string, ODF>& getObjectContainer() override;
+		ConstIterator begin() const noexcept;
+		Iterator begin() noexcept;
+		ConstIterator end() const noexcept;
+		Iterator end() noexcept;
+		std::unordered_map<std::string, ODF>& getObjectContainer();
 
-		void updateKeys(ObjectSpecifier& spec) const override;
-		void saveToMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) const override;
-		void loadFromMemory(MemoryDataStream& mem, const ObjectSpecifier& spec) override;
+		void updateKeys(ObjectSpecifier& spec) const;
+		void saveToMemory(MemoryDataStream& mem) const;
+		void loadFromMemory(MemoryDataStream& mem, const std::variant<MixedObjectSpecifier*, FixedObjectSpecifier*>& specifier);
 
 		void clearAndFix(); // clear and make fixed
 		void clearAndFix(const Type& elementType); // clear and make fixed
@@ -848,14 +856,18 @@ public:
 		// or loadFromMemory with specifier (load specifier, then load object)
 		virtual void updateSpec(ArraySpecifier& spec) const = 0;
 		virtual void saveToMemory(MemoryDataStream& mem) const = 0;
-		virtual void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) = 0;
+		virtual void loadFromMemory(MemoryDataStream& mem) = 0;
 	};
 	
-	class DF_API List : public AbstractComplexDataObject, public AbstractArray
+	class DF_API List : public AbstractComplexDataObject
 	{
 	public:
+		using Iterator = AbstractArray::Iterator;
+		using ConstIterator = AbstractArray::ConstIterator;
+		using IteratorType = AbstractArray::IteratorType;
 		class DF_API FixedArray : public AbstractArray
 		{
+			FixedArraySpecifier* spec;
 			std::vector<ODF> list;
 			Type fixType; // uses a complex type to compare. Example: A list made out of FixedArrays holding different types would have the same Variant- and Primitive- type but different types in the final document
 		public:
@@ -891,7 +903,7 @@ public:
 
 			void updateSpec(ArraySpecifier& spec) const override;
 			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) override;
+			void loadFromMemory(MemoryDataStream& mem) override;
 
 			struct InvalidTypeChange : public std::runtime_error
 			{
@@ -900,22 +912,25 @@ public:
 
 			FixedArray();
 			template<typename T>
-			FixedArray(const std::initializer_list<T>& initializer_list)
+			FixedArray(const std::initializer_list<T>& initializer_list) : spec(nullptr)
 			{
 				for (const T& t : initializer_list)
 					push_back(t);
 			}
 			template<typename T>
-			FixedArray(const std::vector<T>& vector)
+			FixedArray(const std::vector<T>& vector) : spec(nullptr)
 			{
 				for (const T& t : vector)
 					push_back(t);
 			}
+
+			friend class ODF::List;
 		};
 
 		// inherits all vector functions from AbstractArray
 		class DF_API MixedArray : public AbstractArray
 		{
+			MixedArraySpecifier* spec;
 			std::vector<ODF> list;
 		public:
 			void push_back(const ODF& odf) override;
@@ -943,40 +958,42 @@ public:
 
 			void updateSpec(ArraySpecifier& spec) const override;
 			void saveToMemory(MemoryDataStream& mem) const override;
-			void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) override;
+			void loadFromMemory(MemoryDataStream& mem) override;
 
 			MixedArray();
 			MixedArray(const std::initializer_list<ODF>& initializer_list);
+
+			friend class ODF::List;
 		};
 
 		std::variant<FixedArray, MixedArray> list;
 
-		void push_back(const ODF& odf) override;
-		void push_front(const ODF& odf) override;
-		void erase(size_t index) override;
-		void erase(size_t index, size_t numberOfElements) override;
-		void erase_range(size_t from, size_t to) override;
-		void insert(size_t where, const ODF& odf) override;
+		void push_back(const ODF& odf);
+		void push_front(const ODF& odf);
+		void erase(size_t index);
+		void erase(size_t index, size_t numberOfElements);
+		void erase_range(size_t from, size_t to);
+		void insert(size_t where, const ODF& odf);
 
-		size_t find(const ODF& odf) const override;
-		size_t size() const override;
-		void clear() override;
-		void resize(size_t newSize) override;
+		size_t find(const ODF& odf) const;
+		size_t size() const;
+		void clear();
+		void resize(size_t newSize);
 
-		ODF& operator[](size_t index) override;
-		const ODF& operator[](size_t index) const override;
-		ODF& at(size_t index) override;
-		const ODF& at(size_t index) const override;
+		ODF& operator[](size_t index);
+		const ODF& operator[](size_t index) const;
+		ODF& at(size_t index);
+		const ODF& at(size_t index) const;
 
-		ConstIterator begin() const noexcept override;
-		Iterator begin() noexcept override;
-		ConstIterator end() const noexcept override;
-		Iterator end() noexcept override;
-		std::vector<ODF>& getArrayContainer() override;
+		ConstIterator begin() const noexcept;
+		Iterator begin() noexcept;
+		ConstIterator end() const noexcept;
+		Iterator end() noexcept;
+		std::vector<ODF>& getArrayContainer();
 
-		void updateSpec(ArraySpecifier& spec) const override;
-		void saveToMemory(MemoryDataStream& mem) const override;
-		void loadFromMemory(MemoryDataStream& mem, const ArraySpecifier& spec) override;
+		void updateSpec(ArraySpecifier& spec) const;
+		void saveToMemory(MemoryDataStream& mem) const;
+		void loadFromMemory(MemoryDataStream& mem, const std::variant<MixedArraySpecifier*, FixedArraySpecifier*>& specifier);
 
 		// type functions
 		void clearAndFix(); // clear and make fixed
@@ -1314,6 +1331,8 @@ public:
 	Status loadFromStream(std::istream& in);
 
 private:
+	void updateComplexSpecifier() const; // modifies type.complexSpec
+
 	Status saveBody(MemoryDataStream& mem) const;
 	Status saveObject(MemoryDataStream& mem) const;
 	Status saveArray(MemoryDataStream& mem) const;
