@@ -1,0 +1,77 @@
+{
+  "@modified": "2025-09-25T09:10:43.005Z",
+  "atomic_mass": {
+    "unit": "u",
+    "value": 227.0278
+  },
+  "block": "d",
+  "classification": {
+    "cas": [
+      {
+        "value": "7440-34-8"
+      }
+    ],
+    "echa": null,
+    "eg": null
+  },
+  "column": 3,
+  "electron_config": "Rn 6d[1] 7s[2]",
+  "era": "classifying",
+  "goldschmidt": "synthetic",
+  "group": 20,
+  "ionization": {
+    "unit": "eV",
+    "values": [
+      5.380226,
+      11.75,
+      17.431,
+      44.8,
+      55
+    ]
+  },
+  "names": {
+    "de": "Actinium",
+    "en": "Actinium",
+    "fr": "Actinium",
+    "la": "Actinium"
+  },
+  "natural_occurrence": "decay",
+  "number": 89,
+  "period": 7,
+  "properties": [
+    "natural",
+    "heavy",
+    "radioactive",
+    "artificial"
+  ],
+  "set": "actinoide",
+  "shell": [
+    2,
+    8,
+    18,
+    32,
+    18,
+    9,
+    2
+  ],
+  "symbol": "Ac",
+  "weblinks": [
+    {
+      "text": "WebElements",
+      "url": "https://webelements.com/actinium"
+    },
+    {
+      "text": "The Periodic Table of Videos",
+      "url": "http://periodicvideos.com/videos/089.htm"
+    },
+    {
+      "text": "PeriodicTable.com",
+      "url": "https://periodictable.com/Elements/089"
+    }
+  ],
+  "wiki": {
+    "de": "Actinium",
+    "en": "Actinium",
+    "fr": "Actinium"
+  }
+}

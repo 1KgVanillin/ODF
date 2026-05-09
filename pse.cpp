@@ -303,7 +303,6 @@ void pse()
 	keyLists.reserve(jpse.size());
 	for (auto it = jpse.begin(); it != jpse.end(); it++)
 	{
-		cout << "\rcollecting keys of \"" << it.key() << "\"";
 		keyLists.push_back(std::make_pair(it.key(), getSubKeys(it.value())));
 		if (keyLists[keyLists.size() - 1].second.empty())
 			cout << "warning: keyList of \"" << it.key() << "\" is empty\n";
@@ -333,6 +332,46 @@ void pse()
 		}
 	}
 
+	ODF::Type fixtype = ODF::TypeSpecifier(ODF::TypeSpecifier::MXOBJ); // operator= in constructor creates complexSpec
+	{
+		auto spec = fixtype.mixedObjectSpecifier();
+		spec->properties["properties"] = ODF::Type::fxlist(ODF::Primitive::CSTR);
+		spec->properties["@modified"] = ODF::Primitive::CSTR;
+		spec->properties["goldschmidt"] = ODF::Primitive::CSTR;
+		spec->properties["wiki"] = ODF::Type::fxlist(ODF::Primitive::CSTR);
+		spec->properties["shell"] = ODF::Type::fxlist(ODF::Primitive::UBYTE);
+		spec->properties["electron_config"] = ODF::Primitive::CSTR;
+		spec->properties["block"] = ODF::Primitive::CSTR;
+		spec->properties["era"] = ODF::Primitive::CSTR;
+		spec->properties["set"] = ODF::Primitive::CSTR;
+		spec->properties["natural_occurrence"] = ODF::Primitive::CSTR;
+		spec->properties["symbol"] = ODF::Primitive::CSTR;
+		spec->properties["column"] = ODF::Primitive::UBYTE;
+		spec->properties["period"] = ODF::Primitive::UBYTE;
+		spec->properties["group"] = ODF::Primitive::UBYTE;
+		spec->properties["number"] = ODF::Primitive::UBYTE;
+
+		auto& classification = spec->properties["classification"];
+		classification = ODF::Type::mxobj();
+		classification.mixedObjectSpecifier()->properties["echa"] = ODF::Primitive::CSTR;
+		classification.mixedObjectSpecifier()->properties["cas"] = ODF::Type::mxlist();
+		classification.mixedObjectSpecifier()->properties["eg"] = ODF::Primitive::CSTR;
+
+		auto& atomic_mass = spec->properties["atomic_mass"];
+		atomic_mass = ODF::Type::mxobj();
+		atomic_mass.mixedObjectSpecifier()->properties["unit"] = ODF::Primitive::CSTR;
+		atomic_mass.mixedObjectSpecifier()->properties["value"] = ODF::Primitive::DOUBLE;
+
+		ODF::Type weblink = ODF::Type::mxobj();
+		weblink.mixedObjectSpecifier()->properties["text"] = ODF::Primitive::CSTR;
+		weblink.mixedObjectSpecifier()->properties["url"] = ODF::Primitive::CSTR;
+		auto& weblinks = spec->properties["weblinks"];
+		weblinks = ODF::Type::fxobj(weblink);
+
+		auto& ionization = spec->properties[""]
+	}
+
+
 	cout << "Number of generic keys: " << genericKeys.size() << "\n";
 	cout << "===== Result =====\n";
 	print(genericKeys);
@@ -354,8 +393,14 @@ void pse()
 		}
 	}
 
+
+
 	std::ofstream out("test/ppse.json");
 	std::string dump = processedPSE.dump();
+	out.write(dump.c_str(), dump.size());
+	out.close();
+	out.open("test/ac.json");
+	dump = processedPSE.at("ac").dump(2);
 	out.write(dump.c_str(), dump.size());
 	out.close();
 

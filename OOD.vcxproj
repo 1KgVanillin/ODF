@@ -133,6 +133,7 @@
     <ClCompile Include="MemoryDataStream.cpp" />
     <ClCompile Include="ODF.cpp" />
     <ClCompile Include="OdfInline.cpp" />
+    <ClCompile Include="odfstatic.cpp" />
     <ClCompile Include="OdfUtil.cpp" />
     <ClCompile Include="pse.cpp" />
   </ItemGroup>

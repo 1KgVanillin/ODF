@@ -33,6 +33,9 @@
     <ClCompile Include="OdfUtil.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
+    <ClCompile Include="odfstatic.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OODErrorCodes.h">
